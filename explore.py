@@ -96,21 +96,15 @@ def tile_strategy_3d(impl, op_args, in_x):
 
 def tile_generator_3d(op_args):
     i, j, k, dtype = op_args
-    tiles_i = utils.factors_enumeration(i, 2)
-    tiles_j = utils.factors_enumeration(j, 2)
-    tiles_k = utils.factors_enumeration(k, 2)
+    tiles_i = [t[0] for t in utils.factors_enumeration(i, 1)]
+    tiles_j = [t[0] for t in utils.factors_enumeration(j, 1)]
+    tiles_k = [t[0] for t in utils.factors_enumeration(k, 1)]
     all_tiles = [tiles_i, tiles_j, tiles_k]
     all_in_x = list(itertools.product(*all_tiles))
     logger.debug(f"Total space size: {len(all_in_x)} for problem dims: {i}x{j}x{k}")
-    # Filter out last level if > 1024 or j > 64
-    all_in_x = [
-        x
-        for x in all_in_x
-        if utils.mulall([t[-1] for t in x]) <= 1024 and x[1][-1] <= 64
-    ]
+    # Filter out last level if > 1024 vector elems
+    all_in_x = [x for x in all_in_x if utils.mulall(x) <= 1024 / min(x[1], 16)]
     logger.debug(f"Filtered space size: {len(all_in_x)} for problem dims: {i}x{j}x{k}")
-    # Chain with leading factors removed
-    all_in_x = [list(itertools.chain(*[t[1:] for t in in_x])) for in_x in all_in_x]
     return all_in_x
 
 
@@ -162,18 +156,19 @@ def tile_strategy_4d(impl, op_args, in_x):
 
 def tile_generator_4d(op_args):
     i, j, k, dtype = op_args
-    tiles_i = [t[1] for t in utils.factors_enumeration(i, 2)]
-    tiles_j = [t[1] for t in utils.factors_enumeration(j, 2)]
-    tiles_k = [t[1] for t in utils.factors_enumeration(k, 2)]
+    tiles_i = [t[0] for t in utils.factors_enumeration(i, 1)]
+    tiles_j = [t[0] for t in utils.factors_enumeration(j, 1)]
+    tiles_k = [t[0] for t in utils.factors_enumeration(k, 1)]
     orders = list(range(6))  # 6 permutations for 3 axes
     all_tiles = [tiles_i, tiles_j, tiles_k, orders]
     all_in_x = list(itertools.product(*all_tiles))
     logger.debug(f"Total space size: {len(all_in_x)} for problem dims: {i}x{j}x{k}")
-    # Filter out last level if > 1024 vector elems
+    # Filter out last level if > 1024 vector elems.
+    # x[1] is the tile size for the vector axis, x[-1] in [1, 4] is true when the vector axis is inner
     all_in_x = [
         x
         for x in all_in_x
-        if utils.mulall(x[:-1]) <= 1024 / min(x[1], max((x[-1] in [1, 4]) * 16, 1))
+        if utils.mulall(x[:-1]) / min(x[1], max((x[-1] in [1, 4]) * 16, 1)) <= 1024
     ]
     logger.debug(f"Filtered space size: {len(all_in_x)} for problem dims: {i}x{j}x{k}")
     return all_in_x
@@ -265,7 +260,7 @@ def search_some(scheduler, tile_strategy, tile_generator, op_args, args):
             writer.writerow([x, time, peak])
             outf.flush()
 
-        if args.search == "exhaustive":
+        if args.search in ["exhaustive", "random"]:
             results = evaluate_exhaustive(
                 scheduler,
                 tile_strategy,
