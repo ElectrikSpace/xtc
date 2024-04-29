@@ -24,17 +24,16 @@ import transform
 transform_opt = "transform-interpreter"
 transform_opts = [
     f"--{transform_opt}",
-    "--func-bufferize",
-    "--buffer-deallocation",
-    "--convert-linalg-to-loops",
 ]
 
 lowering_opts = [
     # "--allow-unregistered-dialect",
     # "--mlir-print-op-generic",
-    # "--canonicalize",
     # "--test-transform-dialect-erase-schedule",
+    "--func-bufferize",
+    "--buffer-deallocation",
     "--test-transform-dialect-erase-schedule",
+    # "--lower-affine",
     "--convert-scf-to-cf",
     "--canonicalize",
     "--convert-vector-to-llvm=enable-x86vector",
@@ -223,16 +222,15 @@ class Implementer:
         tiling_instrs.append(parent_instr)
         tiling_instrs += transform.tiling_apply_patterns(parent)
 
-        if self.vectorization:
-            vect_instrs += [transform.get_vectorize(current_state)]
-            # vectorized,vectorize = transform.get_vectorize_children(parent)
-            # vect_instrs.append(vectorize)
-            vect_instrs += transform.vector_apply_patterns(parent)
-        else:
+        if len(self.vectorization) == 0:
             scalarized, scalarization = transform.get_scalarize(current_state)
             vect_instrs.append(scalarization)
             current_state = scalarized
-            # tiling_instrs.append(transform.get_vectorize(current_state))
+
+        vect_instrs += [transform.get_vectorize(current_state)]
+        # vectorized,vectorize = transform.get_vectorize_children(parent)
+        # vect_instrs.append(vectorize)
+        vect_instrs += transform.vector_apply_patterns(parent)
 
         # Produce the unrolling instructions (prevent unrolling of
         # "single tiles" : automatically performed
