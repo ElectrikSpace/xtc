@@ -49,8 +49,21 @@ Use exploration script, for instance on input data generated on some tvm search 
 
     ./explore.py --debug --dims 256 256 512 --strategy tile4d --search data --data data/tvm_results.mm06.csv --output results.mm06.csv
 
+
+## Display
+
+Result of exploration in `data/mlir_results.mm06.csv` on revision `2b0688cc` were generated with:
+
+    ./explore.py --debug --dims 256 256 512 --strategy tile4d --search data --data data/tvm_results.mm06.csv --output data/mlir_results.mm06.csv
+
+Comparative performance distribution in `data/results.mm06.svg` were generated with the display script:
+
+    ./display-results.py --output data/results.mm06.svg --title "Exhaustive 1-level tiling + reorder (i,j,k, order) of 256x256x512 matmul" data/tvm_results.mm06.csv:tvm data/mlir_results.mm06.csv:mlir:X:peak
+
+
 ## Issues
 
 ### Scalar FMAs
 
 The option ```--math-uplift-to-fma``` combines arith operations into ```math.fma``` if the flag ```fast``` is set, but how to generate the latter ?
+
