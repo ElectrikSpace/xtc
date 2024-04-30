@@ -1,5 +1,6 @@
 matplotlib
 numpy
 ordered-set
+py-cpuinfo
 tqdm
 typing_extensions
