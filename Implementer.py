@@ -27,13 +27,9 @@ transform_opts = [
 ]
 
 lowering_opts = [
-    # "--allow-unregistered-dialect",
-    # "--mlir-print-op-generic",
-    # "--test-transform-dialect-erase-schedule",
     "--func-bufferize",
     "--buffer-deallocation",
     "--test-transform-dialect-erase-schedule",
-    # "--lower-affine",
     "--convert-scf-to-cf",
     "--canonicalize",
     "--convert-vector-to-llvm=enable-x86vector",
@@ -316,6 +312,42 @@ class Implementer:
 
         return str_glued
 
+    def build_compile_extra_opts(
+        self,
+        print_source_ir,
+        print_transformed_ir,
+        print_ir_after,
+        print_ir_before,
+        color,
+    ):
+        compile_extra_opts = []
+        if print_source_ir:
+            zero_opt = mliropt_opts[0].replace("--", "")
+            compile_extra_opts.append(f"--mlir-print-ir-before={zero_opt}")
+        if print_transformed_ir:
+            zero_lowering_opt = lowering_opts[0].replace("--", "")
+            compile_extra_opts.append(f"--mlir-print-ir-before={zero_lowering_opt}")
+        compile_extra_opts += [f"--mlir-print-ir-after={p}" for p in print_ir_after]
+        compile_extra_opts += [f"--mlir-print-ir-before={p}" for p in print_ir_before]
+        return compile_extra_opts
+
+    def build_disassemble_extra_opts(self, print_assembly, color):
+        disassemble_extra_opts = []
+        if print_assembly:
+            disassemble_extra_opts += [obj_dump_file]
+        if color:
+            disassemble_extra_opts += objdump_color_opts
+        return disassemble_extra_opts
+
+    def build_run_extra_opts(self, print_assembly, color):
+        run_extra_opts = []
+        if print_assembly:
+            run_extra_opts += [
+                "--dump-object-file",
+                f"--object-filename={obj_dump_file}",
+            ]
+        return run_extra_opts
+
     def evaluate(
         self,
         print_source_ir=False,
@@ -323,33 +355,27 @@ class Implementer:
         print_ir_after=[],
         print_ir_before=[],
         print_assembly=False,
-        color=False,
+        color=True,
     ):
         str_module = self.glue()
 
-        compile_extra_opts = []
         run_extra_opts = []
-        disassemble_extra_opts = []
 
-        if print_source_ir:
-            zero_opt = mliropt_opts[0].replace("--", "")
-            compile_extra_opts.append(f"--mlir-print-ir-before={zero_opt}")
-        if print_transformed_ir:
-            zero_lowering_opt = lowering_opts[0].replace("--", "")
-            compile_extra_opts.append(f"--mlir-print-ir-before={zero_lowering_opt}")
+        compile_extra_opts = self.build_compile_extra_opts(
+            print_source_ir=print_source_ir,
+            print_transformed_ir=print_transformed_ir,
+            print_ir_after=print_ir_after,
+            print_ir_before=print_ir_before,
+            color=color,
+        )
 
-        compile_extra_opts += [f"--mlir-print-ir-after={p}" for p in print_ir_after]
-        compile_extra_opts += [f"--mlir-print-ir-before={p}" for p in print_ir_before]
+        disassemble_extra_opts = self.build_disassemble_extra_opts(
+            print_assembly=print_assembly, color=color
+        )
 
-        if print_assembly:
-            run_extra_opts += [
-                "--dump-object-file",
-                f"--object-filename={obj_dump_file}",
-            ]
-            disassemble_extra_opts += [obj_dump_file]
-
-        if color:
-            disassemble_extra_opts += objdump_color_opts
+        run_extra_opts = self.build_run_extra_opts(
+            print_assembly=print_assembly, color=color
+        )
 
         module_llvm = subprocess.run(
             [self.mliropt] + mliropt_opts + compile_extra_opts,
