@@ -174,20 +174,14 @@ class Implementer:
             has_output=False,
         )
 
-        dims_vectors = {}
-
         # Build the transform vectors corresponding to each tiling instruction
+        dims_vectors = {}
         for tile_level in range(len(max(self.tiles.values(), key=len))):
             for dim_to_tile, (k, v) in enumerate(self.tiles.items()):
                 if tile_level >= len(v):
                     continue
-                dim_name = list(v.keys())[tile_level]
-                # TODO depends on matmul
-                if dim_name in self.parallelization:
-                    vsize = len(self.dims) - (len(self.dims) - len(self.parallel_dims))
-                else:
-                    vsize = len(self.dims)
                 #
+                dim_name = list(v.keys())[tile_level]
                 dims_vectors[dim_name] = [
                     v[dim_name] if i == dim_to_tile else 0
                     for i in range(len(self.tiles))
@@ -196,52 +190,51 @@ class Implementer:
         # Reorder the vectors (according to the permutation)
         dims_vectors = dict([(p, dims_vectors[p]) for p in self.permutation])
 
-        # Actually produce the tiling (and vectorization) instructions
-        loop_nest = dict()
+        # Actually produce the tiling instructions and annotate the resulting
+        # loops
         current_state = input_var
         tiling_instrs = []
         vect_instrs = []
         for dim, dims_vector in dims_vectors.items():
+            # Useless to materialize a loop which will be vectorized
             if dim in self.vectorization:
-                break
-            new_state, new_loop, new_instr = transform.produce_tiling_instr(
+                continue
+            # The actual tiling
+            current_state, new_loop, new_instr = transform.produce_tiling_instr(
                 current_state=current_state,
                 dims_vector=dims_vector,
                 parallel=dim in self.parallelization,
             )
+            # Name the resulting loop
             annot = transform.annotate(new_loop, dim)
+            #
             tiling_instrs += [new_instr + annot]
-            loop_nest[dim] = new_loop
-            current_state = new_state
 
+        # If no vectorial tile, we scalarize the linalg op just after tiling
+        if len(self.vectorization) == 0:
+            scalarized, scalarization = transform.get_scalarize(current_state)
+            current_state = scalarized
+
+        # Obtain a handler for patterns application
         parent, parent_instr = transform.get_parent(current_state)
-        # parent, parent_instr = transform.get_parent(list(loop_nest.values())[1])
         tiling_instrs.append(parent_instr)
+
+        # Canonicalize the code produced by the tiling operations
         tiling_instrs += transform.tiling_apply_patterns(parent)
 
-        if len(self.vectorization) == 0:
-            # TODO : constraint non-vector fmas ?
-            scalarized, scalarization = transform.get_scalarize(current_state)
-
+        # Produce the vectorization instructions
         vectorized, vectorize = transform.get_vectorize_children(parent)
         apply_patterns0 = transform.vector_pre_hoist_apply_patterns(vectorized)
         hoisted, hoist = transform.vector_hoist(vectorized)
         lower_contract = transform.vector_lower_outerproduct_patterns(hoisted)
         vect_instrs += [vectorize] + apply_patterns0 + [hoist] + lower_contract
 
+        # Produce the unrolling instructions using the annotations on loops
         unroll_instrs = []
         for dim, factor in self.unrolling.items():
             loop, match_loop = transform.match_by_attribute(hoisted, dim)
             unroll = transform.get_unroll(loop, factor)
             unroll_instrs += [match_loop, unroll]
-
-        # Produce the unrolling instructions (prevent unrolling of
-        # "single tiles" : automatically performed
-        # unroll_instrs = [
-        #     transform.get_unroll(loop=loop_nest[dim],factor=factor)
-        #     for dim,factor in self.unrolling.items() if factor > 1
-        # ]
-        # unroll_instrs = []
 
         lines = (
             [seq_sig, "{"]
