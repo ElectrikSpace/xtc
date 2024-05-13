@@ -3,3 +3,4 @@ numpy
 ordered-set
 tqdm
 typing_extensions
+pyyaml
