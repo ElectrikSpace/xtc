@@ -84,7 +84,7 @@ def mlir_matmul_sched(i, j, k, dtype):
 
 def tvm_matmul(i, j, k, dtype):
     operation = tvm_impl.Operation(
-        tvm_impl.Operators.matmul, (256, 256, 512, DTYPES_MAP[dtype])
+        tvm_impl.Operators.matmul, (i, j, k, DTYPES_MAP[dtype])
     )
     return operation
 
