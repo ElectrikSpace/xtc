@@ -247,7 +247,9 @@ class AbsImplementer(ABC):
         color=True,
     ):
         str_module = self.glue()
-        mlir_process = self.execute_command(cmd=self.mliropt, input_pipe=str_module)
+        mlir_process = self.execute_command(
+            cmd=self.mliropt, input_pipe=str_module, debug=False
+        )
         return str(mlir_process.stdout)
 
     def compile(
