@@ -18,7 +18,7 @@ impl = MmMlirImplementer(
 impl.tile("i", {"i1": 8})
 impl.tile("j", {"j1": 8})
 impl.tile("k", {"k1": 8})
-impl.interchange(["ij", "k", "i1", "k1", "j1"])
+impl.interchange(["i", "j", "k", "i1", "k1", "j1"])
 impl.vectorize(["j1"])
 impl.parallelize(["i"])
 impl.unroll({"k1": 8, "i1": 8})

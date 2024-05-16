@@ -1,8 +1,9 @@
 import os
+import sys
 
 from PartialImplementer import PartialImplementer
 
-source_path = "/tmp/test.mlir"
+source_path = "/tmp/test.mlir" if len(sys.argv) <= 1 else sys.argv[1]
 payload_name = "payload0"
 
 home = os.environ.get("HOME", "")
@@ -22,6 +23,6 @@ e = impl.evaluate(
     print_ir_before=[],
     print_assembly=True,
     color=True,
-    debug=False,
+    debug=True,
 )
 print(e)

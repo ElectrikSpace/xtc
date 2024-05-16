@@ -42,17 +42,17 @@ class XdslSepInitImplementer(XdslImplementer):
         )
         return payload_func
 
-    def main(self, ext_rtclock, ext_printF64, payload_func, init_payload):
+    def main(self, ext_rtclock, ext_printF64, payload_func):
         results_types = [r.type for r in self.source_op.results]
         #
         inputs = self.inputs_init()
         rtclock_call1 = func.Call(ext_rtclock.sym_name.data, [], [f64])
         outputs = self.outputs_init()
-        init_payload_call = func.Call(init_payload.sym_name.data, [], results_types)
+        outputs_vars = []
+        for o in outputs:
+            outputs_vars += o.results
         payload_call = func.Call(
-            payload_func.sym_name.data,
-            inputs + init_payload_call.results,
-            results_types,
+            payload_func.sym_name.data, inputs + outputs_vars, results_types
         )
         rtclock_call2 = func.Call(ext_rtclock.sym_name.data, [], [f64])
         elapsed = arith.Subf(rtclock_call2, rtclock_call1)
@@ -60,9 +60,9 @@ class XdslSepInitImplementer(XdslImplementer):
         main = Block()
         main.add_ops(
             inputs
+            + [rtclock_call1]
+            + outputs
             + [
-                rtclock_call1,
-                init_payload_call,
                 payload_call,
                 rtclock_call2,
                 elapsed,

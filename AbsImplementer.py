@@ -28,6 +28,7 @@ transform_opts = [
 lowering_opts = [
     "--test-transform-dialect-erase-schedule",
     "--func-bufferize",
+    "--buffer-deallocation",
     "--convert-vector-to-scf",
     "--convert-linalg-to-loops",
     "--lower-affine",
@@ -309,15 +310,13 @@ class AbsImplementer(ABC):
         ext_rtclock = self.build_rtclock()
         ext_printF64 = self.build_printF64()
         payload_func = self.payload()
-        init_func = self.init_payload()
-        main_func = self.main(ext_rtclock, ext_printF64, payload_func, init_func)
+        main_func = self.main(ext_rtclock, ext_printF64, payload_func)
         str_mod = "\n".join(
             [
                 str(tl)
                 for tl in [
                     ext_rtclock,
                     ext_printF64,
-                    init_func,
                     payload_func,
                     main_func,
                 ]
