@@ -48,9 +48,9 @@ mliropt_opts = transform_opts + lowering_opts
 
 mlirtranslate_opts = ["--mlir-to-llvmir"]
 
-llc_opts = ["-O3", "-filetype=obj"]
+llc_opts = ["-O3", "-filetype=obj", "--march=native"]
 
-opt_opts = ["-O3"]
+opt_opts = ["-O3", "--march=native"]
 
 dump_file = "/tmp/dump"
 
