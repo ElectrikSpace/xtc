@@ -349,6 +349,10 @@ def build_main(matchers_transformers):
         + f"{input_var} : (!transform.any_op) -> !transform.any_op"
     )
 
+    fills, match_fills = match_by_op_name(bufferized_var, "linalg.fill")
+    fills_tiled, tile_loop, tile_fills = produce_tiling_instr(fills, [1, 16])
+    vectorize_fills = get_vectorize(fills_tiled)
+
     branches = []
     current_state = bufferized_var
     for matcher, transformer in matchers_transformers:
@@ -360,10 +364,6 @@ def build_main(matchers_transformers):
         branches.append(shot)
         current_state = new_state
 
-    fills, match_fills = match_by_op_name(current_state, "linalg.fill")
-    fills_tiled, tile_loop, tile_fills = produce_tiling_instr(fills, [1, 16])
-    vectorize_fills = get_vectorize(fills_tiled)
-
     tyield = "transform.yield"
 
     lines = (
@@ -371,8 +371,11 @@ def build_main(matchers_transformers):
             seq_sig,
             "{",
             bufferization,
+            match_fills,
+            tile_fills,
+            vectorize_fills,
         ]
         + branches
-        + [match_fills, tile_fills, vectorize_fills, tyield, "}"]
+        + [tyield, "}"]
     )
     return sym_name, "\n".join(lines)

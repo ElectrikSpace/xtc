@@ -91,6 +91,8 @@ class MlirImplementer(PerfectlyNestedImplementer):
             A = f_args[0]
             B = f_args[1]
             C = f_args[2]
+            scal = arith.ConstantOp(self.elt_type, 0.0)
+            linalg.fill(scal, outs=[C])
             op = linalg.matmul(A, B, outs=[C])
         else:
             assert False
@@ -130,9 +132,9 @@ class MlirImplementer(PerfectlyNestedImplementer):
             callrtclock1 = func.CallOp(frtclock, [], loc=self.loc)
 
             for oty in self.outputs_types:
-                scal = arith.ConstantOp(self.elt_type, 0.0)
+                # scal = arith.ConstantOp(self.elt_type,0.0)
                 mem = memref.AllocOp(oty, [], [])
-                linalg.fill(scal, outs=[mem])
+                # linalg.fill(scal,outs=[mem])
                 inputs.append(mem)
 
             func.CallOp(fmatmul, inputs, loc=self.loc)
