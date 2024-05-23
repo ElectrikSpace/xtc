@@ -22,21 +22,23 @@ from mlir.dialects import builtin, func
 import transform
 
 transform_opt = "transform-interpreter"
+erase_schedule_opt = "test-transform-dialect-erase-schedule"
 transform_opts = [
     f"--{transform_opt}",
+    "--func-bufferize",
+    "--canonicalize",
 ]
 
 lowering_opts = [
-    "--test-transform-dialect-erase-schedule",
+    f"--{erase_schedule_opt}",
     "--lower-affine",
+    "--convert-vector-to-scf",
+    "--convert-linalg-to-loops",
     "--loop-invariant-code-motion",
+    "--buffer-loop-hoisting",
     "--cse",
     "--sccp",
     "--canonicalize",
-    "--func-bufferize",
-    "--convert-vector-to-scf",
-    "--convert-linalg-to-loops",
-    "--lower-affine",
     "--convert-scf-to-cf",
     "--canonicalize",
     "--cse",
@@ -152,8 +154,7 @@ class AbsImplementer(ABC):
             zero_opt = mliropt_opts[0].replace("--", "")
             compile_extra_opts.append(f"--mlir-print-ir-before={zero_opt}")
         if print_transformed_ir:
-            zero_lowering_opt = lowering_opts[0].replace("--", "")
-            compile_extra_opts.append(f"--mlir-print-ir-before={zero_lowering_opt}")
+            compile_extra_opts.append(f"--mlir-print-ir-after={erase_schedule_opt}")
         compile_extra_opts += [f"--mlir-print-ir-after={p}" for p in print_ir_after]
         compile_extra_opts += [f"--mlir-print-ir-before={p}" for p in print_ir_before]
         return compile_extra_opts
