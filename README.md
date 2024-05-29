@@ -54,6 +54,11 @@ pip install -r tvm_requirements.txt
 export PYTHONPATH=$PYTHONPATH:/path_to_tvm/python
 ```
 
+For using jir backend, install JIR (ref to https://gitlab.inria/fr/jprotopo/jir.git) and set python path:
+```
+export PYTHONPATH=$PYTHONPATH:/path_to_jir
+```
+
 ## Use it
 
 + Example in test.py
@@ -95,7 +100,12 @@ Use exhaustive search on a tiling strategy limited to tile4d + only vectorized t
     time -p ./explore.py --debug --dims 256 256 512 --strategy tile4dv --search exhaustive --backend xdsl --output data/results.mm06-tile4dv-xdsl.csv
     450/450 [38:44<00:00,  5.17s/it]
     real 2329.94
- 
+
+    # JIR backend
+    time -p ./explore.py --debug --dims 256 256 512 --strategy tile4dv --search exhaustive --backend jir --output data/results.mm06-tile4dv-xdsl.csv
+    450/450 [22:30<00:00,  3.00s/it]
+    real 1352.37
+
     # MLIR backend (jit compilation)
     time -p ./explore.py --debug --dims 256 256 512 --strategy tile4dv --search exhaustive --backend mlir --eval jit --output data/results.mm06-tile4dv-mlir.jit.csv
     450/450 [11:57<00:00,  1.59s/it]
@@ -136,7 +146,8 @@ Result of exploration and display in `data/mlir_results.mm06-tile4d-all.svg` wer
 
 Comparative performance distribution on tile4dv tilings for mlir and tvm backends in `data/mlir_results.mm06-tile4dv-all.svg` were generated with:
 
-    ./display-results.py  --output data/results.mm06-tile4dv-all.svg --title "Exhaustive 1-level tiling + reorder (i,j,k, order) of 256x256x512 vectorized matmul" data/results.mm06-tile4dv-tvm.csv:tvm:X:peak data/results.mm06-tile4dv-xdsl.csv:xdsl:X:peak data/results.mm06-tile4dv-mlir.csv:mlir:X:peak
+    ./explore.py --debug --dims 256 256 512 --strategy tile4dv --search exhaustive --backends mlir tvm --output data/results.mm06-tile4dv-all.csv
+    ./display-results.py  --output data/results.mm06-tile4dv-all.svg --title "Exhaustive 1-level tiling + reorder (i,j,k, order) of 256x256x512 vectorized matmul" data/results.mm06-tile4dv-all.csv:tvm:X:peak:tvm data/results.mm06-tile4dv-all.csv:mlir:X:peak:mlir
 
 ## Compile time comparison
 

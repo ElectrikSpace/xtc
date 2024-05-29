@@ -40,6 +40,7 @@ Different tiling strategies are available:
 
 """
 
+import sys
 import os
 import argparse
 import logging
@@ -50,20 +51,17 @@ import numpy as np
 from tqdm import tqdm
 
 import utils
-from XdslImplementer import XdslImplementer as xdsl_impl
-from MlirImplementer import MlirImplementer as mlir_impl
-
-import TVMImplementer as tvm_impl
+from ndarray import NDArray
 
 logger = logging.getLogger(__name__)
 
 
-def xdsl_matmul(i, j, k, dtype):
+def xdsl_matmul(i, j, k, ftype):
     from xdsl.dialects import func, linalg
     from xdsl.dialects.builtin import TensorType, f32, f64
     from xdsl.ir import Block
 
-    elt_type = {"f32": f32, "f64": f64}[dtype]
+    elt_type = {"f32": f32, "f64": f64}[ftype]
     operands_types = [TensorType(elt_type, shape) for shape in [[i, k], [k, j], [i, j]]]
     block0 = Block(arg_types=operands_types)
     matmul = linalg.MatmulOp(
@@ -73,45 +71,75 @@ def xdsl_matmul(i, j, k, dtype):
     return matmul
 
 
-def xdsl_matmul_sched(i, j, k, dtype):
-    op_matmul = xdsl_matmul(i, j, k, dtype)
-    sched = xdsl_impl(
+def xdsl_matmul_sched(i, j, k, ftype):
+    from XdslImplementer import XdslImplementer as impl
+
+    op_matmul = xdsl_matmul(i, j, k, ftype)
+    sched = impl(
         mlir_install_dir=f"{HOME}/bin/llvm-xdsl",
         source_op=op_matmul,
         dims={"i": i, "j": j, "k": k},
         parallel_dims=["i", "j"],
         reduction_dims=["k"],
     )
-    return sched, op_matmul
+    return sched, op_matmul, "xdsl"
 
 
-def mlir_matmul_sched(i, j, k, dtype):
-    op_matmul = xdsl_matmul(i, j, k, dtype)
-    sched = mlir_impl(
+def mlir_matmul_sched(i, j, k, ftype):
+    from MlirImplementer import MlirImplementer as impl
+
+    op_matmul = xdsl_matmul(i, j, k, ftype)
+    sched = impl(
         mlir_install_dir=f"{HOME}/bin/llvm-xdsl",
         source_op=op_matmul,
         dims={"i": i, "j": j, "k": k},
         parallel_dims=["i", "j"],
         reduction_dims=["k"],
     )
-    return sched, op_matmul
+    return sched, op_matmul, "mlir"
 
 
-def tvm_matmul(i, j, k, dtype):
-    operation = tvm_impl.Operation(
-        tvm_impl.Operators.matmul, (i, j, k, DTYPES_MAP[dtype])
-    )
+def tvm_matmul(i, j, k, ftype):
+    import TVMImplementer as impl
+
+    operation = impl.Operation(impl.Operators.matmul, (i, j, k, DTYPES_MAP[ftype]))
     return operation
 
 
-def tvm_matmul_sched(i, j, k, dtype):
-    op_matmul = tvm_matmul(i, j, k, dtype)
-    sched = tvm_impl.Implementer(
+def tvm_matmul_sched(i, j, k, ftype):
+    import TVMImplementer as impl
+
+    op_matmul = tvm_matmul(i, j, k, ftype)
+    sched = impl.Implementer(
         source_op=op_matmul,
         dims=dict(i=i, j=j, k=k),
         parallel_dims=["i", "j"],
     )
-    return sched, op_matmul
+    return sched, op_matmul, "tvm"
+
+
+def jir_matmul(i, j, k, ftype):
+    import JIRImplementer as impl
+
+    return impl.Operation(impl.Operators.matmul, (i, j, k, DTYPES_MAP[ftype]))
+
+
+def jir_matmul_sched(i, j, k, ftype):
+    import JIRImplementer as impl
+
+    op = jir_matmul(i, j, k, ftype)
+    dims = dict(i=i, j=j, k=k)
+    dtype = op.args[3]
+    jir_install_dir = f"{HOME}/bin/llvm-jir"
+    geist_install_dir = f"{HOME}/bin/llvm-geist"
+    sched = impl.Implementer(
+        source_op=op,
+        dims=dims,
+        jir_install_dir=jir_install_dir,
+        geist_install_dir=geist_install_dir,
+    )
+    # sched.save_temps = True
+    return sched, op, "jir"
 
 
 def tile_strategy_3d(impl, op_args, in_x):
@@ -321,10 +349,38 @@ def tile_generator_7d(op_args, size=None):
             yield np.array(x)
 
 
+def get_eval_parameters(args):
+    NDArray.set_alloc_alignment(
+        2 * 1024 * 1024
+    )  # 2MB to catch Huge Pages if THB is one
+    dims_names = OPERATORS[args.operator]["dims"]
+    dims_map = {k: v for k, v in zip(dims_names, args.dims)}
+    dtype = DTYPES_MAP[args.dtype]
+    inputs = OPERATORS[args.operator]["inputs"]
+    outputs = OPERATORS[args.operator]["outputs"]
+    inputs_spec = [
+        {
+            "shape": tuple([dims_map[x] for x in shape]),
+            "dtype": dtype,
+        }
+        for shape in inputs
+    ]
+    outputs_spec = [
+        {
+            "shape": tuple([dims_map[x] for x in shape]),
+            "dtype": dtype,
+        }
+        for shape in outputs
+    ]
+    nd_inputs = [NDArray(utils.np_init(**spec)) for spec in inputs_spec]
+    nd_outputs = [NDArray(np.empty(**spec)) for spec in outputs_spec]
+    return (nd_inputs, nd_outputs)
+
+
 def evaluate_one(scheduler, tile_strategy, op_args, in_x, args, callback=None):
     assert isinstance(in_x, list), f"X not a list: {in_x} ({type(in_x)})"
-    logger.debug(f"Evaluate: {in_x}...")
-    impl, op = scheduler(*op_args)
+    impl, op, backend = scheduler(*op_args)
+    logger.debug(f"Evaluate: {backend}: {in_x}...")
     tile_strategy(impl, op_args, in_x)
     eval_args = {}
     if args.dump:
@@ -351,8 +407,9 @@ def evaluate_one(scheduler, tile_strategy, op_args, in_x, args, callback=None):
             number=args.number,
             min_repeat_ms=args.min_repeat_ms,
             validate=args.validate,
+            parameters=args.eval_parameters,
         )
-    logger.debug("STDOUT: %s", stdout)
+    logger.debug("timing: %s", stdout)
     error = 0
     try:
         # TODO: for now we detect errors when trying to parse the result
@@ -366,15 +423,13 @@ def evaluate_one(scheduler, tile_strategy, op_args, in_x, args, callback=None):
     else:
         logger.error(f"Error evaluating: {in_x}")
 
-    result = (in_x, error, time)
+    result = (in_x, error, time, backend)
     if callback:
         callback(result)
     return result
 
 
-def evaluate_exhaustive(
-    scheduler, tile_strategy, tile_generator, op_args, args, callback=None
-):
+def evaluate_exhaustive(tile_strategy, tile_generator, op_args, args, callback):
     gen_size = args.trials if args.search == "random" else None
     all_in_x = tile_generator(op_args, size=gen_size)
     all_in_x = np.array(list(all_in_x))  # convert list or generator to np.array
@@ -384,25 +439,17 @@ def evaluate_exhaustive(
                 np.arange(len(all_in_x)), size=args.trials, replace=False
             )
             all_in_x = all_in_x[idxs]
-    results = []
     for in_x in tqdm(all_in_x, smoothing=0):
-        result = evaluate_one(
-            scheduler, tile_strategy, op_args, in_x.tolist(), args, callback
-        )
-        results.append(result)
-    return results
+        evaluate_one_backends(tile_strategy, op_args, in_x.tolist(), args, callback)
 
 
-def evaluate_data(scheduler, tile_strategy, X, op_args, args, callback=None):
+def evaluate_data(tile_strategy, X, op_args, args, callback):
     size = len(X)
     logger.debug(f"Search space size: {size}")
-    results = []
     for in_x in tqdm(X, smoothing=0):
-        result = evaluate_one(
+        evaluate_one_backends(
             scheduler, tile_strategy, op_args, in_x.tolist(), args, callback
         )
-        results.append(result)
-    return results
 
 
 def read_input(fname, args):
@@ -423,60 +470,62 @@ def peak_time(args):
     )
 
 
-def search_some(scheduler, tile_strategy, tile_generator, op_args, args):
+def search_some(tile_strategy, tile_generator, op_args, args):
     # Search depends on search strategy
     ptime = peak_time(args)
     with open(args.output, "w", newline="") as outf:
         writer = csv.writer(outf, delimiter=";")
-        writer.writerow(("X", "time", "peak"))
+        writer.writerow(("X", "time", "peak", "backend"))
         outf.flush()
 
         def result_callback(result):
-            x, error, time = result
+            x, error, time, backend = result
             if error != 0:
-                logger.debug(f"Skip recording error for: {x}")
+                logger.debug(f"Skip recording error for: {backend}: {x}")
                 return
             peak = ptime / time
-            row = [x, time, peak]
+            row = [x, time, peak, backend]
             logger.debug(f"Record row: {row}")
             writer.writerow(row)
             outf.flush()
 
         if args.search in ["exhaustive", "random"]:
-            results = evaluate_exhaustive(
-                scheduler,
-                tile_strategy,
-                tile_generator,
-                op_args,
-                args,
-                callback=result_callback,
+            evaluate_exhaustive(
+                tile_strategy, tile_generator, op_args, args, callback=result_callback
             )
         elif args.search == "data":
             assert args.data is not None
             X = read_input(args.data, args)
-            results = evaluate_data(
-                scheduler, tile_strategy, X, op_args, args, callback=result_callback
-            )
+            evaluate_data(tile_strategy, X, op_args, args, callback=result_callback)
+
+
+def evaluate_one_backends(tile_strategy, op_args, in_x, args, callback):
+    for backend in args.backends:
+        scheduler = OPERATORS[args.operator]["backends"][backend]["scheduler"]
+        evaluate_one(scheduler, tile_strategy, op_args, in_x, args, callback=callback)
 
 
 def optimize(args):
     dims = args.dims
     dtype = args.dtype
     op_args = (*dims, dtype)
-    scheduler = OPERATORS[args.operator]["backends"][args.backend]["scheduler"]
     tile_strategy = STRATEGIES[args.strategy]["strategy"]
     if args.test:
         ptime = peak_time(args)
-        in_x, error, time = evaluate_one(
-            scheduler, tile_strategy, op_args, args.test, args
+
+        def output_one(results):
+            in_x, error, time, backend = results
+            if error == 0:
+                logger.info(
+                    f"Schedule: {backend}: {in_x}: time: {time * 1000:.2f} msecs, peak perf: {ptime / time * 100:.2f}%"
+                )
+
+        evaluate_one_backends(
+            tile_strategy, op_args, args.test, args, callback=output_one
         )
-        if error == 0:
-            logger.info(
-                f"Schedule: {in_x}: time: {time * 1000:.2f} msecs, peak perf: {ptime / time * 100:.2f}%"
-            )
     else:
         tile_generator = STRATEGIES[args.strategy]["generator"]
-        search_some(scheduler, tile_strategy, tile_generator, op_args, args)
+        search_some(tile_strategy, tile_generator, op_args, args)
 
 
 HOME = os.environ.get("HOME", "")
@@ -493,6 +542,8 @@ OPERATORS = {
         "dims": ["i", "j", "k"],
         "default_dims": [512, 1024, 128],
         "default_type": "f32",
+        "inputs": [["i", "k"], ["k", "j"]],
+        "outputs": [["i", "j"]],
         "backends": {
             "mlir": {
                 "operation": xdsl_matmul,
@@ -505,6 +556,10 @@ OPERATORS = {
             "tvm": {
                 "operation": tvm_matmul,
                 "scheduler": tvm_matmul_sched,
+            },
+            "jir": {
+                "operation": jir_matmul,
+                "scheduler": jir_matmul_sched,
             },
         },
     },
@@ -559,9 +614,17 @@ def main():
     parser.add_argument(
         "--backend",
         type=str,
-        choices=["mlir", "tvm", "xdsl"],
+        choices=["mlir", "tvm", "xdsl", "jir"],
         default="mlir",
         help="backend to use",
+    )
+    parser.add_argument(
+        "--backends",
+        type=str,
+        nargs="+",
+        choices=["mlir", "tvm", "xdsl", "jir"],
+        default=["mlir"],
+        help="backends to use",
     )
     parser.add_argument(
         "--data", type=str, help="data CSV file for input to data search"
@@ -624,9 +687,12 @@ def main():
     global THREADS
     THREADS = args.threads
 
-    if args.backend == "tvm":
+    if "tvm" in args.backends:
         # Force number of threads for TVM
         os.environ["TVM_NUM_THREADS"] = str(args.threads)
+
+    if args.eval == "eval":
+        args.eval_parameters = get_eval_parameters(args)
 
     optimize(args)
 

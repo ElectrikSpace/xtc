@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 logger = logging.getLogger(__name__)
 
 
-def read_results_csv(fname, Xcol="X", Ycol="Y"):
+def read_results_csv(fname, Xcol="X", Ycol="Y", backend=None):
     X, Y = [], []
     with open(fname, newline="") as infile:
         reader = csv.reader(infile, delimiter=";")
@@ -27,10 +27,13 @@ def read_results_csv(fname, Xcol="X", Ycol="Y"):
             if idx == 0:
                 X_idx = row.index(Xcol)
                 Y_idx = row.index(Ycol)
+                if backend is not None:
+                    backend_idx = row.index("backend")
             else:
-                # eval(row[X_idx], {}, {})
-                X.append(row[X_idx])
-                Y.append(eval(row[Y_idx], {}, {}))
+                if backend is None or row[backend_idx] == backend:
+                    # eval(row[X_idx], {}, {})
+                    X.append(row[X_idx])
+                    Y.append(eval(row[Y_idx], {}, {}))
     return np.array(X), np.array(Y)
 
 
@@ -42,10 +45,11 @@ def read_inputs(args):
             1: f"res_{idx}",
             2: "X",
             3: "Y",
+            4: None,
         }
         spec_map.update({k: v for k, v in enumerate(inp.split(":"))})
-        fname, label, Xcol, Ycol = list(spec_map.values())
-        X, Y = read_results_csv(fname, Xcol=Xcol, Ycol=Ycol)
+        fname, label, Xcol, Ycol, backend = list(spec_map.values())
+        X, Y = read_results_csv(fname, Xcol=Xcol, Ycol=Ycol, backend=backend)
         results.append(ns(X=X, Y=Y, label=label))
     return results
 

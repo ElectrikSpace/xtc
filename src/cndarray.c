@@ -82,18 +82,6 @@ int CNDArray_fini(CNDArray* array)
   array->dl_tensor.shape = NULL;
 }
 
-int CNDArray_empty(CNDArray* array, int32_t ndim, const int64_t* shape, DLDataType dtype, DLDevice dev)
-{
-  int result;
-  result = CNDArray_init(array, ndim, shape, dtype, dev);
-  if (result != 0) {
-    return result;
-  }
-  int64_t total_elem_bytes = CNDArray_data_size(array);
-  memset(array->dl_tensor.data, 0, total_elem_bytes);
-  return 0;
-}
-
 void CNDArray_IncrementReference(CNDArray* array)
 {
   array->reference_count++;
@@ -128,6 +116,12 @@ void CNDArray_copy_to_data(CNDArray* array, void *data)
   LOG("CNDArray_copy_to_data: array ptr = %p, data ptr = %p\n", array, data);
   int64_t total_elem_bytes = CNDArray_data_size(array);
   memcpy(data, array->dl_tensor.data, total_elem_bytes);
+}
+
+void CNDArray_fill_zero(CNDArray* array)
+{
+  int64_t total_elem_bytes = CNDArray_data_size(array);
+  memset(array->dl_tensor.data, 0, total_elem_bytes);
 }
 
 CNDArray *CNDArray_new(int32_t ndim, const int64_t* shape, DLDataType dtype, DLDevice dev)
