@@ -418,27 +418,60 @@ class AbsImplementer(ABC):
         min_repeat_ms=0,
         number=1,
         validate=False,
+        parameters=None,
+    ):
+        results, code, error = self.load_and_eval(
+            dll,
+            sym,
+            repeat=repeat,
+            min_repeat_ms=min_repeat_ms,
+            number=number,
+            validate=validate,
+            parameters=parameters,
+        )
+        if code == 0:
+            return min(results)
+        else:
+            return error
+
+    def load_and_eval(
+        self,
+        dll,
+        sym,
+        repeat=1,
+        min_repeat_ms=0,
+        number=1,
+        validate=False,
+        parameters=None,
     ):
         libpath = os.path.abspath(dll)
         with utils.LibLoader(libpath) as lib:
             func = getattr(lib, sym)
             inputs_spec = self.np_inputs_spec()
             outputs_spec = self.np_outputs_spec()
-            inputs = [utils.np_init(**spec) for spec in inputs_spec]
-            outputs = [np.empty(**spec) for spec in outputs_spec]
+            if parameters is None:
+                inputs = [utils.np_init(**spec) for spec in inputs_spec]
+                outputs = [np.empty(**spec) for spec in outputs_spec]
+                parameters = (
+                    [NDArray(inp) for inp in inputs],
+                    [NDArray(out) for out in outputs],
+                )
             if validate:
+                ref_inputs = [inp.numpy() for inp in parameters[0]]
                 ref_outputs = [np.empty(**spec) for spec in outputs_spec]
-                self.reference_impl(*inputs, *ref_outputs)
+                self.reference_impl(*ref_inputs, *ref_outputs)
                 exec_func = Executor(func)
-                exec_func(*inputs, *outputs)
-                for out_ref, out in zip(ref_outputs, outputs):
+                exec_func(*parameters[0], *parameters[1])
+                for out_ref, out in zip(
+                    ref_outputs, [out.numpy() for out in parameters[1]]
+                ):
                     if not np.allclose(out_ref, out):
-                        return "Error in validation: outputs differ"
+                        return [], 1, "Error in validation: outputs differ"
             eval_func = Evaluator(
                 func, repeat=repeat, min_repeat_ms=min_repeat_ms, number=number
             )
-            results = eval_func(*inputs, *outputs)
-        return min(results)
+            results = eval_func(*parameters[0], *parameters[1])
+        return np.array(results), 0, ""
 
     def glue(self):
         # Generate the payload
