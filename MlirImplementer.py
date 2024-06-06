@@ -52,26 +52,19 @@ class MlirImplementer(PerfectlyNestedImplementer):
             reduction_dims,
         )
 
-        self.ctx = Context()
-        self.loc = Location.unknown(self.ctx)
-        self.module = builtin.ModuleOp(loc=self.loc)
-        self.module.operation.attributes["transform.with_named_sequence"] = (
-            UnitAttr.get(context=self.ctx)
-        )
-
         if str(source_op.operands[0].type.get_element_type()) == "f32":
             self.elt_type = F32Type.get(context=self.ctx)
-            # self.np_elt_type = numpy.float32
         else:
             assert False
 
-        with Context():
-            self.inputs_types = [
-                MemRefType.parse(str(i.type)) for i in self.source_op.inputs
-            ]
-            self.outputs_types = [
-                MemRefType.parse(str(i.type)) for i in self.source_op.outputs
-            ]
+        self.inputs_types = [
+            MemRefType.parse(str(i.type), context=self.ctx)
+            for i in self.source_op.inputs
+        ]
+        self.outputs_types = [
+            MemRefType.parse(str(i.type), context=self.ctx)
+            for i in self.source_op.outputs
+        ]
 
     def build_rtclock(self):
         f64 = F64Type.get(context=self.ctx)
@@ -145,9 +138,7 @@ class MlirImplementer(PerfectlyNestedImplementer):
             callrtclock1 = func.CallOp(frtclock, [], loc=self.loc)
 
             for oty in self.outputs_types:
-                # scal = arith.ConstantOp(self.elt_type,0.0)
                 mem = memref.AllocOp(oty, [], [])
-                # linalg.fill(scal,outs=[mem])
                 inputs.append(mem)
 
             func.CallOp(fmatmul, inputs, loc=self.loc)

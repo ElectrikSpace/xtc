@@ -103,8 +103,15 @@ class AbsImplementer(ABC):
         vectors_size: int,
         payload_name=None,
     ):
+        self.ctx = Context()
+        self.loc = Location.unknown(self.ctx)
+        self.module = builtin.ModuleOp(loc=self.loc)
+        self.module.operation.attributes["transform.with_named_sequence"] = (
+            UnitAttr.get(context=self.ctx)
+        )
+        #
         self.vectors_size = vectors_size
-
+        #
         self.payload_name = (
             payload_name if payload_name else f"payload{AbsImplementer.count}"
         )
