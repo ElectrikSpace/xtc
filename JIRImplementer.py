@@ -135,11 +135,6 @@ class Implementer:
         with open(f"{save_temps_dir}/{fname}", "w") as outf:
             outf.write(content)
 
-    def default_transform(self) -> None:
-        transform_cmds, transform_dims = self.transformer.generate_transform()
-        transform_sequence = "".join([f"{t};\n" for t in transform_cmds])
-        self._transform(transform_sequence, transform_dims)
-
     def _transform(
         self, transform_sequence: str, transform_dims: dict[str, int]
     ) -> None:
@@ -178,9 +173,23 @@ class Implementer:
     def interchange(self, axes_order: list[str]) -> None:
         self.transformer.interchange(axes_order)
 
-    def compile_jir_module(self) -> Any:
+    def _compile_jir_module(self, dump_file, **kwargs) -> Any:
+        save_temps = kwargs.get("save_temps", False)
+        save_temps_dir = kwargs.get("save_temps_dir") or "./save_temps_dir"
+        save_temp = partial(self._save_temp, save_temps, save_temps_dir)
         if self._transformed_jir_function is None:
-            self.default_transform()
+            save_temp(f"{dump_file}.jir", str(self.jir_function))
+            transform_cmds, transform_dims = self.transformer.generate_transform()
+            transform_dims_str = "".join(
+                [f"{k}={v}\n" for k, v in transform_dims.items()]
+            )
+            transform_cmds_str = "".join([f"{t};\n" for t in transform_cmds])
+            save_temp(f"{dump_file}.dims", transform_dims_str)
+            save_temp(f"{dump_file}.tjir", transform_cmds_str)
+            self._transform(transform_cmds_str, transform_dims)
+            save_temp(
+                f"{dump_file}.transformed.jir", str(self._transformed_jir_function)
+            )
         fn = self._transformed_jir_function
         dims = self._transformed_jir_dims
         index = JIRFunctionDimensionIndex()
@@ -191,6 +200,7 @@ class Implementer:
         if not ctx.well_defined:
             raise RuntimeError("Some ctx dimensions are missing")
         module = self._generate_module_for(ctx)
+        save_temp(f"{dump_file}.module.mlir", str(module))
         return module
 
     def compile(
@@ -210,15 +220,8 @@ class Implementer:
             self._target_triple,
             self._target_arch,
         )
-        save_temp(f"{dump_file}.jir", str(self.jir_function))
-        module = self.compile_jir_module()
-        save_temp(f"{dump_file}.transformed.jir", str(self._transformed_jir_function))
-        save_temp(f"{dump_file}.tjir", str(self._transformed_jir_cmds))
-        save_temp(
-            f"{dump_file}.dims",
-            "\n".join([f"{k}={v}" for k, v in self._transformed_jir_dims.items()]),
-        )
-        save_temp(f"{dump_file}.module.mlir", str(module))
+        module = self._compile_jir_module(dump_file=dump_file, **kwargs)
+        save_temp(f"{dump_file}.polygeist.c", self.op_function)
         computation_primitives = self._get_op_function_mlir()
         save_temp(f"{dump_file}.op.mlir", str(computation_primitives))
         computation_module = str(

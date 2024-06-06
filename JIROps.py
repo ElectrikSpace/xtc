@@ -9,6 +9,8 @@ class Operation:
     def __init__(self, operator: "Operator", args: tuple) -> None:
         self.operator = operator
         self.args = args
+        self.dim_names = self.operator.dim_names()
+        self.axes_names = self.operator.axes_names()
         self.args_names = self.operator.args_names()
 
     def generate(self) -> tuple[str, str, str]:
@@ -45,9 +47,9 @@ function %ENTRY
     I0: for i in I (O)
       J0: for j in J (O)
         %OP_ENTRY_0(O)
-    I: for i in I (*)
-      J: for j in J (*)
-        K: for k in K (*)
+    II: for i in I (*)
+      JJ: for j in J (*)
+        KK: for k in K (*)
             %OP_ENTRY(O, A, B)
   }
 """
@@ -72,6 +74,14 @@ function %ENTRY
     @classmethod
     def args_names(cls) -> tuple:
         return ("I", "J", "K", "DTYPE")
+
+    @classmethod
+    def dim_names(cls) -> tuple:
+        return ("I", "J", "K")
+
+    @classmethod
+    def axes_names(cls) -> tuple:
+        return ("II", "JJ", "KK")
 
     @staticmethod
     def inputs_dims(i, j, k, dtype):
