@@ -48,11 +48,19 @@ export PYTHONPATH=$PYTHONPATH:$HOME/bin/llvm-xdsl/python_packages/mlir_core
 pip install -r requirements.txt
 ```
 
+### TVM backend requirements
+
 For using tvm backend, install TVM and do (on pinocchio use for instance TVM installed in `/opt/local/tvm/tvm-v0.16.0.rc0/`):
 ```
 pip install -r tvm_requirements.txt
 export PYTHONPATH=$PYTHONPATH:/path_to_tvm/python
 ```
+
+Note that if compiling TVM version v0.16 from source, one should first
+apply the patch `patches/tvm-Bugfix-TIR-Fix-race-on-ComputationCache.patch`
+which fix a race condition in TVM.
+
+### JIR backend requirements
 
 For using jir backend, install JIR (ref to https://gitlab.inria/fr/jprotopo/jir.git) and set python path:
 ```
@@ -115,7 +123,7 @@ Result of exploration and display in `data/results.mm06-tile7d-all.svg` were gen
 Comparative performance distribution on tile4dv tilings in `data/mlir_results.mm06-tile4dv-all.svg` were generated with:
 
     ./explore.py --debug --dims 256 256 512 --backends tvm mlir jir --validate --strategy tile4dv  --search exhaustive --output data/results.mm06-tile4dv-all.csv
-    ./display-results.py --title "Tile4DV tiling startegy exhaustive for 256x256x512 vectorized matmul" data/results.mm06-tile4dv-all.csv:tvm:X:peak:tvm data/results.mm06-tile4dv-all.csv:mlir:X:peak:mlir data/results.mm06-tile4dv-all.csv:jir:X:peak:jir --output data/results.mm06-tile4dv-all.svg
+    ./display-results.py --title "Tile4DV tiling strategy exhaustive for 256x256x512 vectorized matmul" data/results.mm06-tile4dv-all.csv:tvm:X:peak:tvm data/results.mm06-tile4dv-all.csv:mlir:X:peak:mlir data/results.mm06-tile4dv-all.csv:jir:X:peak:jir --output data/results.mm06-tile4dv-all.svg
 
 
 ## Notes
