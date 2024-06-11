@@ -67,16 +67,11 @@ def reference_matmul(a, b, c):
     np.matmul(a, b, out=c)
 
 
-def mlir_init():
-    from MlirNodeImplementer import MlirNodeImplementer as impl
-
-
-def xdsl_matmul(i, j, k, ftype):
+def xdsl_matmul_graph(i, j, k, ftype):
     from xdsl.dialects import func, linalg, arith, builtin
-    from xdsl.dialects.builtin import MemRefType, f32, f64
+    from xdsl.dialects.builtin import MemRefType, f32, f64, UnitAttr
     from xdsl.ir import Block, Region
     from xdsl.builder import ImplicitBuilder
-    from MlirNodeImplementer import MlirNodeImplementer
 
     elt_type = {"f32": f32, "f64": f64}[ftype]
     ops_types = [MemRefType(elt_type, shape) for shape in [[i, k], [k, j], [i, j]]]
@@ -94,128 +89,147 @@ def xdsl_matmul(i, j, k, ftype):
             outputs=(block.args[2],),
         )
         func.ReturnOp()
+    fill.attributes["__xtc_id_fill__"] = UnitAttr()
+    matmul.attributes["__xtc_id_matmul__"] = UnitAttr()
     region = Region([block])
+    payload = func.FuncOp.from_region(
+        name="matmul",
+        input_types=ops_types,
+        return_types=[],
+        region=region,
+    )
     args = {f"arg{i}": arg for i, arg in enumerate(block.args)}
     graph = {
         "args": args,
         "inps": ["arg0", "arg1"],
         "outs": ["arg2"],
+        "payload": payload,
         "nodes": {
             "fill": {
                 "args": ["arg2"],
                 "inps": [],
                 "outs": ["arg2"],
-                "impl": MlirNodeImplementer(
-                    payload_name="fill",
-                    source_op=fill,
-                    dims={"i": i, "j": j},
-                    parallel_dims=["i", "j"],
-                    reduction_dims=[],
-                    no_alias=True,
-                    always_vectorize=True,
-                ),
+                "dims": {"i": i, "j": j},
+                "parallel_dims": ["i", "j"],
+                "reduction_dims": [],
+                "op": fill,
             },
             "matmul": {
                 "args": ["arg0", "arg1", "arg2"],
                 "inps": ["arg0", "arg1", "arg2"],
                 "outs": ["arg2"],
-                "impl": MlirNodeImplementer(
-                    payload_name="matmul",
-                    source_op=matmul,
-                    dims={"i": i, "j": j, "k": k},
-                    parallel_dims=["i", "j"],
-                    reduction_dims=["k"],
-                    no_alias=True,
-                    always_vectorize=True,
-                ),
+                "dims": {"i": i, "j": j, "k": k},
+                "parallel_dims": ["i", "j"],
+                "reduction_dims": ["k"],
+                "op": matmul,
             },
         },
     }
-    return region, graph
+    return graph
 
 
-def mlir_matmul_sched(i, j, k, ftype, args):
+def mlir_matmul_impl(i, j, k, ftype, graph, args):
     from xdsl.ir import Block, Region
     from xdsl.dialects.builtin import FunctionType, MemRefType, f32, f64
     from xdsl.dialects import func
     from MlirGraphImplementer import MlirGraphImplementer
     from MlirCompiler import MlirCompiler
+    from MlirNodeImplementer import MlirNodeImplementer
 
-    region, graph = xdsl_matmul(i, j, k, ftype)
-    operands_types = [arg.type for arg in graph["args"].values()]
-    name = "f"
-    payload = func.FuncOp.from_region(
-        name=name,
-        input_types=operands_types,
-        return_types=[],
-        region=region,
-    )
-    nodes = {ident: node["impl"] for ident, node in graph["nodes"].items()}
+    mlir_nodes = {
+        ident: MlirNodeImplementer(
+            payload_name=ident,
+            source_op=node["op"],
+            dims=node["dims"],
+            parallel_dims=node["parallel_dims"],
+            reduction_dims=node["reduction_dims"],
+            no_alias=True,
+            always_vectorize=True,
+            id=f"__xtc_id_{ident}__",
+        )
+        for ident, node in graph["nodes"].items()
+    }
     impl = MlirGraphImplementer(
-        xdsl_func=payload, nodes=[node for node in nodes.values()]
+        xdsl_func=graph["payload"],
+        nodes=list(mlir_nodes.values()),
     )
     compiler = MlirCompiler(
         mlir_module=impl,
         to_disassemble=impl.payload_name,
     )
-    target = nodes["matmul"]
-    return compiler, impl, target, target.source_op, "mlir"
+    impl_node = mlir_nodes["matmul"]
+    source_op = impl_node.source_op
+    return compiler, impl, impl_node, source_op, "mlir"
 
 
-def tvm_init():
-    import tvm
-    import tvm.te
-    import TVMImplementer as impl
+def tvm_matmul_graph(i, j, k, ftype):
+    # Note that mlir, tvm import order causes issues
+    import tvm, tvm.te
+    import TVMImplementer
+
+    matmul = TVMImplementer.Operation(
+        TVMImplementer.Operators.matmul, (i, j, k, DTYPES_MAP[ftype])
+    )
+    return {
+        "nodes": {
+            "matmul": {
+                "dims": {"i": i, "j": j, "k": k},
+                "parallel_dims": ["i", "j"],
+                "reduction_dims": ["k"],
+                "op": matmul,
+            }
+        }
+    }
 
 
-def tvm_matmul(i, j, k, ftype):
-    import TVMImplementer as impl
+def tvm_matmul_impl(i, j, k, ftype, graph, args):
+    import TVMImplementer
 
-    operation = impl.Operation(impl.Operators.matmul, (i, j, k, DTYPES_MAP[ftype]))
-    return operation
-
-
-def tvm_matmul_sched(i, j, k, ftype, args):
-    import TVMImplementer as impl
-
-    op_matmul = tvm_matmul(i, j, k, ftype)
-    sched = impl.Implementer(
-        source_op=op_matmul,
-        dims=dict(i=i, j=j, k=k),
-        parallel_dims=["i", "j"],
+    node = graph["nodes"]["matmul"]
+    sched = TVMImplementer.Implementer(
+        source_op=node["op"],
+        dims=node["dims"],
+        parallel_dims=node["parallel_dims"],
     )
     compiler = sched
-    target = sched
-    return compiler, sched, target, op_matmul, "tvm"
+    impl_node = sched
+    return compiler, sched, impl_node, node["op"], "tvm"
 
 
-def jir_init():
-    import JIRImplementer as impl
+def jir_matmul_graph(i, j, k, ftype):
+    import JIRImplementer
+
+    matmul = JIRImplementer.Operation(
+        JIRImplementer.Operators.matmul, (i, j, k, DTYPES_MAP[ftype])
+    )
+    return {
+        "nodes": {
+            "matmul": {
+                "dims": {"i": i, "j": j, "k": k},
+                "parallel_dims": ["i", "j"],
+                "reduction_dims": ["k"],
+                "op": matmul,
+            }
+        }
+    }
 
 
-def jir_matmul(i, j, k, ftype):
-    import JIRImplementer as impl
+def jir_matmul_impl(i, j, k, ftype, graph, args):
+    import JIRImplementer
 
-    return impl.Operation(impl.Operators.matmul, (i, j, k, DTYPES_MAP[ftype]))
-
-
-def jir_matmul_sched(i, j, k, ftype, args):
-    import JIRImplementer as impl
-
-    op = jir_matmul(i, j, k, ftype)
-    dims = dict(i=i, j=j, k=k)
-    dtype = op.args[3]
+    node = graph["nodes"]["matmul"]
+    # TODO: MLIR JIR install dirs
     jir_install_dir = f"{HOME}/bin/llvm-jir"
     geist_install_dir = f"{HOME}/bin/llvm-geist"
-    sched = impl.Implementer(
-        source_op=op,
-        dims=dims,
+    sched = JIRImplementer.Implementer(
+        source_op=node["op"],
+        dims=node["dims"],
         jir_install_dir=jir_install_dir,
         geist_install_dir=geist_install_dir,
     )
     compiler = sched
     target = sched
-    return compiler, sched, target, op, "jir"
+    return compiler, sched, target, node["op"], "jir"
 
 
 def tile_strategy_3d(impl, op_args, in_x):
@@ -451,15 +465,22 @@ def get_eval_parameters(args):
     return (nd_inputs, nd_outputs)
 
 
-def compile_one_backends(ident, tile_strategy, op_args, in_x, args, callback):
+def get_all_impls(op_args, args):
+    return [
+        (backend, OPERATORS[args.operator]["backends"][backend]["operation"](*op_args))
+        for backend in args.backends
+    ]
+
+
+def compile_one_impls(ident, impls, tile_strategy, op_args, in_x, args, callback):
     compiled = []
-    for backend in args.backends:
-        scheduler = OPERATORS[args.operator]["backends"][backend]["scheduler"]
-        backend_ident = f"{args.operator}_{backend}_{ident}"
+    for name, impl in impls:
+        task_ident = f"{args.operator}_{name}_{ident}"
         compiled.append(
             compile_one(
-                backend_ident,
-                scheduler,
+                task_ident,
+                name,
+                impl,
                 tile_strategy,
                 op_args,
                 in_x,
@@ -470,12 +491,21 @@ def compile_one_backends(ident, tile_strategy, op_args, in_x, args, callback):
     return compiled
 
 
-def compile_one(ident, scheduler, tile_strategy, op_args, in_x, args, callback=None):
+def compile_one(
+    ident, backend, operation, tile_strategy, op_args, in_x, args, callback=None
+):
     assert isinstance(in_x, list), f"X not a list: {in_x} ({type(in_x)})"
-    logger.debug("Compile: %s: %s...", ident, in_x)
-    compiler, impl, target, op, backend = scheduler(*op_args, args)
-    tile_strategy(target, op_args, in_x)
-    impl.implement()
+    logger.debug("Compile: %s: %s: %s...", ident, backend, in_x)
+    implementer = OPERATORS[args.operator]["backends"][backend]["implementer"]
+    compiler, module, node, source_op, backend_name = implementer(
+        *op_args, operation, args
+    )
+    import sys
+
+    print("XXXX", compiler, module, node, source_op, backend_name, file=sys.stderr)
+    assert backend_name == backend
+    tile_strategy(node, op_args, in_x)
+    module.implement()
     compile_args = {}
     if args.dump:
         compile_args.update(
@@ -496,7 +526,9 @@ def compile_one(ident, scheduler, tile_strategy, op_args, in_x, args, callback=N
         )
     assert args.eval == "eval"
     dump_file = f"payload_{ident}"
-    compiler.compile(**compile_args, shared_lib=True, dump_file=dump_file)
+    compiler.compile(
+        **compile_args, shared_lib=True, dump_file=dump_file, no_entry=True
+    )
     logger.debug("  Compile done: %s: %s.", ident, in_x)
     return (ident, backend, compiler, dump_file, in_x)
 
@@ -538,12 +570,13 @@ def load_and_evaluate_one(
     return result
 
 
-def evaluate_all_parallel(tile_strategy, all_in_x, op_args, args, callback):
+def evaluate_all_parallel(tile_strategy, all_in_x, impls, op_args, args, callback):
     jobs = args.jobs
 
     def do_compile(idx, in_x):
-        return idx, compile_one_backends(
+        return idx, compile_one_impls(
             ident=f"{idx:04}",
+            impls=impls,
             in_x=in_x,
             tile_strategy=tile_strategy,
             op_args=op_args,
@@ -627,7 +660,7 @@ def evaluate_all_parallel(tile_strategy, all_in_x, op_args, args, callback):
             evalbar.close()
 
 
-def evaluate_generate(tile_strategy, tile_generator, op_args, args, callback):
+def evaluate_generate(tile_strategy, tile_generator, impls, op_args, args, callback):
     gen_size = args.trials if args.search == "random" else None
     all_in_x = tile_generator(op_args, size=gen_size)
     all_in_x = np.array(list(all_in_x))  # convert list or generator to np.array
@@ -637,17 +670,19 @@ def evaluate_generate(tile_strategy, tile_generator, op_args, args, callback):
                 np.arange(len(all_in_x)), size=args.trials, replace=False
             )
             all_in_x = all_in_x[idxs]
-    evaluate_all_parallel(tile_strategy, all_in_x, op_args, args, callback)
+    evaluate_all_parallel(tile_strategy, all_in_x, impls, op_args, args, callback)
 
 
-def evaluate_data(tile_strategy, X, op_args, args, callback):
+def evaluate_data(tile_strategy, X, impls, op_args, args, callback):
     size = len(X)
     logger.debug(f"Search space size: {size}")
-    evaluate_all_parallel(tile_strategy, X, op_args, args, callback)
+    evaluate_all_parallel(tile_strategy, X, impls, op_args, args, callback)
 
 
-def evaluate_one(tile_strategy, in_x, op_args, args, callback):
-    evaluate_all_parallel(tile_strategy, np.array([in_x]), op_args, args, callback)
+def evaluate_one(tile_strategy, in_x, impls, op_args, args, callback):
+    evaluate_all_parallel(
+        tile_strategy, np.array([in_x]), impls, op_args, args, callback
+    )
 
 
 def read_input(fname, args):
@@ -673,7 +708,7 @@ def peak_time(args):
     return time
 
 
-def search_some(tile_strategy, tile_generator, op_args, args):
+def search_some(tile_strategy, tile_generator, impls, op_args, args):
     # Search depends on search strategy
     ptime = peak_time(args)
     with open(args.output, "w", newline="") as outf:
@@ -694,12 +729,19 @@ def search_some(tile_strategy, tile_generator, op_args, args):
 
         if args.search in ["exhaustive", "random"]:
             evaluate_generate(
-                tile_strategy, tile_generator, op_args, args, callback=result_callback
+                tile_strategy,
+                tile_generator,
+                impls,
+                op_args,
+                args,
+                callback=result_callback,
             )
         elif args.search == "data":
             assert args.data is not None
             X = read_input(args.data, args)
-            evaluate_data(tile_strategy, X, op_args, args, callback=result_callback)
+            evaluate_data(
+                tile_strategy, X, impls, op_args, args, callback=result_callback
+            )
 
 
 def optimize(args):
@@ -707,15 +749,16 @@ def optimize(args):
     dtype = args.dtype
     op_args = (*dims, dtype)
     tile_strategy = STRATEGIES[args.strategy]["strategy"]
-    for backend in args.backends:
-        OPERATORS[args.operator]["backends"][backend]["init"]()
+    impls = get_all_impls(op_args, args)
     if args.test:
         all_results = []
 
         def output_one(results):
             all_results.append(results)
 
-        evaluate_one(tile_strategy, args.test, op_args, args, callback=output_one)
+        evaluate_one(
+            tile_strategy, args.test, impls, op_args, args, callback=output_one
+        )
         ptime = peak_time(args)
         for results in all_results:
             in_x, error, time, backend = results
@@ -725,7 +768,7 @@ def optimize(args):
                 )
     else:
         tile_generator = STRATEGIES[args.strategy]["generator"]
-        search_some(tile_strategy, tile_generator, op_args, args)
+        search_some(tile_strategy, tile_generator, impls, op_args, args)
 
 
 HOME = os.environ.get("HOME", "")
@@ -746,19 +789,16 @@ OPERATORS = {
         "outputs": [["i", "j"]],
         "backends": {
             "mlir": {
-                "init": mlir_init,
-                "operation": xdsl_matmul,
-                "scheduler": mlir_matmul_sched,
+                "operation": xdsl_matmul_graph,
+                "implementer": mlir_matmul_impl,
             },
             "tvm": {
-                "init": tvm_init,
-                "operation": tvm_matmul,
-                "scheduler": tvm_matmul_sched,
+                "operation": tvm_matmul_graph,
+                "implementer": tvm_matmul_impl,
             },
             "jir": {
-                "init": jir_init,
-                "operation": jir_matmul,
-                "scheduler": jir_matmul_sched,
+                "operation": jir_matmul_graph,
+                "implementer": jir_matmul_impl,
             },
         },
     },
