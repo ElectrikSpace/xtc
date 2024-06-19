@@ -7,7 +7,6 @@ from abc import ABC
 import subprocess
 import numpy
 
-
 import mlir
 from mlir.ir import (
     Module,
@@ -256,11 +255,17 @@ class MlirImplementer(AbsImplementer):
         sym_name, input_var, seq_sig = transform.get_seq_signature(
             sym_name="@__transform_main"
         )
-        fills, match_fills = transform.match_by_op_name(input_var, "linalg.fill")
-        fills_tiled, tile_loop, tile_fills = transform.produce_tiling_instr(
-            fills, [1, vectors_size]
-        )
-        vectorize_fills = transform.get_vectorize(fills_tiled)
+
+        fills_opt = []
+        # fills,match_fills = transform.match_by_op_name(input_var,"linalg.fill")
+        # fills_tiled,tile_loop,tile_fills = transform.produce_tiling_instr(
+        #     fills,
+        #     [1,vectors_size]
+        # )
+        # fills_opt = [match_fills, tile_fills]
+        # vectorize_fills = transform.get_vectorize(fills_tiled)
+        # fills_opt += [vectorize_fills]
+
         matched, match_attr = transform.match_by_attribute(
             input_var, self.op_id_attribute
         )
@@ -342,7 +347,9 @@ class MlirImplementer(AbsImplementer):
             postprocess = [get_hoist] + get_lower
 
         lines = (
-            [seq_sig, "{", match_fills, tile_fills, vectorize_fills, match_attr]
+            [seq_sig, "{"]
+            + fills_opt
+            + [match_attr]
             + tiling_instrs
             + vect_instrs
             + unroll_instrs

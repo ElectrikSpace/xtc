@@ -154,7 +154,7 @@ class AbsImplementer(ABC):
         debug,
         print_lowered_ir,
     ):
-        if print_transformed_ir:
+        if print_source_ir:
             self.dump_ir("IR Dump Before transform")
         pm = PassManager("builtin.module", context=self.ctx)
         for opt in transform_opts:
