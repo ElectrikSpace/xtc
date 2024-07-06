@@ -27,7 +27,7 @@ i = 512
 j = 128
 k = 1024
 elt_type = f32
-vectors_size = 16
+vectors_size = 8
 
 def get_impl(op):
     impl = MlirImplementer(
@@ -41,7 +41,7 @@ def get_impl(op):
     return impl
 
 def matmul_op():
-    matmul = linalg.MemRefMatmulOp(
+    matmul = linalg.MatmulOp(
         inputs = (
             TestSSAValue(MemRefType(elt_type,(i,k))),
             TestSSAValue(MemRefType(elt_type,(k,j))),

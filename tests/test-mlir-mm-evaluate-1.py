@@ -5,7 +5,7 @@ impl = mm1()
 e = impl.evaluate(
     print_source_ir=False,
     print_transformed_ir=False,
-    print_assembly=False,
+    print_assembly=True,
     color = True,
     debug = False,
 )
