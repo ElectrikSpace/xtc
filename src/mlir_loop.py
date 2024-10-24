@@ -25,7 +25,7 @@ def main():
     parser.add_argument(
         "--llvm-dir",
         type=str,
-        default=f"{home}/bin/llvm-xdsl",
+        default=f"{home}/bin/llvm",
         help="The directory where LLVM binaries are installed.",
     )
     parser.add_argument(

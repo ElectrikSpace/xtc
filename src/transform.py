@@ -123,7 +123,7 @@ def produce_tiling_instr(
 
     opname = "tile_using_forall" if parallel else "tile_using_for"
 
-    attribute = "tile_sizes" if parallel else ""
+    attribute = "tile_sizes"
 
     return_type = "(!transform.any_op"
     num_loops = 0

@@ -61,13 +61,11 @@ Install dependencies (Debian):
 sudo apt install pybind11-dev python3-numpy
 ```
 
-Choose the commit for which xdsl is made (patches are in the directory
-xdsl-transform/patches):
+Choose the commit ```76edf72501cd6f66788c631fada95972a797a4a6```: 
 ```
 git clone git@github.com:llvm/llvm-project.git
 cd llvm-project
-git checkout 98e674c9f16d677d95c67bc130e267fae331e43c
-git apply /path/to/each/patch
+git checkout 76edf72501cd6f66788c631fada95972a797a4a6
 ```
 
 Compile MLIR/CLANG and the MLIR python bindings:
@@ -94,7 +92,7 @@ export PYTHONPATH=$PYTHONPATH:$HOME/bin/llvm-xdsl/python_packages/mlir_core
 ### Install and patch XDSL
 
 ```
-https://github.com/xdslproject/xdsl
+git clone https://github.com/xdslproject/xdsl
 cd xdsl
 git apply /path/to/each/patch
 pip install .
@@ -122,7 +120,7 @@ export PYTHONPATH=$PYTHONPATH:/path_to_jir
 ## Install and use it
 
 ```
-pip install .
+pip install -e .
 mlir-loop tests/annotated_matmul.mlir --evaluate --print-assembly
 ```
 
