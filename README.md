@@ -1,6 +1,6 @@
 # Xdsl Transform
 
-The ```mlir-loop``` tool provides a high-level, declarative syntax for
+The ```mlir-loop``` tool provides a high-level syntax for
 controlling the scheduling of MLIR linear algebra (```linalg```)
 operators. For now, it only applies at ```memref``` level
 (not ```tensor```) and supports the following transformations:
