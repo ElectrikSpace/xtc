@@ -62,7 +62,7 @@ official repositories.
 
 Install dependencies (Debian):
 ```
-sudo apt install pybind11-dev python3-numpy libxml2-dev
+sudo apt install pybind11-dev python3-numpy libxml2-dev objdump
 ```
 
 Choose the commit ```76edf72501cd6f66788c631fada95972a797a4a6```: 
