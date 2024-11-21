@@ -30,9 +30,8 @@ class MlirImplementer(MlirModule, ABC):
     ):
         if no_alias:
             brand_inputs_with_noalias(xdsl_func)
-        self.payload_name = str(xdsl_func.sym_name).replace('"', "")
         #
-        super().__init__([xdsl_func])
+        super().__init__(xdsl_func)
         #
         self.always_vectorize = always_vectorize
         self.concluding_passes = concluding_passes
@@ -62,6 +61,10 @@ class MlirImplementer(MlirModule, ABC):
         pass
 
     @abstractmethod
+    def check_consistency(self):
+        pass
+
+    @abstractmethod
     def generate_tiling(self):
         pass
 
@@ -71,6 +74,7 @@ class MlirImplementer(MlirModule, ABC):
 
     @override
     def implement(self, measure=True):
+        self.check_consistency()
         #
         if measure:
             self.measure_execution_time(
@@ -102,3 +106,15 @@ class MlirImplementer(MlirModule, ABC):
                 )
             transform.YieldOp([])
             self.schedule = True
+
+    @abstractmethod
+    def np_inputs_spec(self) -> list[dict[str, tuple[int, ...] | str]]:
+        pass
+
+    @abstractmethod
+    def np_outputs_spec(self) -> list[dict[str, tuple[int, ...] | str]]:
+        pass
+
+    @abstractmethod
+    def reference_impl(self, *operands):
+        pass

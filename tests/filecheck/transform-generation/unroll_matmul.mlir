@@ -11,7 +11,7 @@ func.func @myfun(
     ins(%cst : f32)
     outs(%C : memref<256x256xf32>)
   linalg.matmul
-    {loop.dims = {"i"=256,"j"=256,"k"=512}, loop.unroll = {k1 = 8}}
+    {loop.dims = {"i"=256,"j"=256,"k"=512}, loop.unroll = {"k" = 8}}
     ins(%A, %B : memref<256x512xf32>, memref<512x256xf32>)
     outs(%C : memref<256x256xf32>)
   return
@@ -21,7 +21,7 @@ func.func @myfun(
 // CHECK-NEXT:    func.func @myfun(%arg0: memref<256x512xf32> {llvm.noalias}, %arg1: memref<512x256xf32> {llvm.noalias}, %arg2: memref<256x256xf32> {llvm.noalias}) {
 // CHECK-NEXT:      %cst = arith.constant 0.000000e+00 : f32
 // CHECK-NEXT:      linalg.fill {id0, loop.dims = {i = 256 : i64, j = 256 : i64}} ins(%cst : f32) outs(%arg2 : memref<256x256xf32>)
-// CHECK-NEXT:      linalg.matmul {id1, loop.dims = {i = 256 : i64, j = 256 : i64, k = 512 : i64}, loop.unroll = {k1 = 8 : i64}} ins(%arg0, %arg1 : memref<256x512xf32>, memref<512x256xf32>) outs(%arg2 : memref<256x256xf32>)
+// CHECK-NEXT:      linalg.matmul {id1, loop.dims = {i = 256 : i64, j = 256 : i64, k = 512 : i64}, loop.unroll = {k = 8 : i64}} ins(%arg0, %arg1 : memref<256x512xf32>, memref<512x256xf32>) outs(%arg2 : memref<256x256xf32>)
 // CHECK-NEXT:      return
 // CHECK-NEXT:    }
 // CHECK-NEXT:    transform.named_sequence @__transform_main(%arg0: !transform.any_op {transform.readonly}) {
@@ -37,7 +37,7 @@ func.func @myfun(
 // CHECK-NEXT:      transform.annotate %loops_5 "id1_j" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_6, %loops_7 = transform.structured.tile_using_for %tiled_linalg_op_4 tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 // CHECK-NEXT:      transform.annotate %loops_7 "id1_k" : !transform.any_op
-// CHECK-NEXT:      %2 = transform.structured.match attributes {id1_k1} in %loops_3 : (!transform.any_op) -> !transform.any_op
+// CHECK-NEXT:      %2 = transform.structured.match attributes {id1_k} in %loops_3 : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      transform.loop.unroll %2 {factor = 8 : i64} : !transform.any_op
 // CHECK-NEXT:      %3 = transform.get_parent_op %loops_3 {isolated_from_above} : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      transform.yield 

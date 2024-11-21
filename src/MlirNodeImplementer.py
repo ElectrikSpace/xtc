@@ -201,6 +201,37 @@ class MlirNodeImplementer(MlirImplementer):
         )
         return self.generate_node_tiling(match0)
 
+    def get_all_tiles_sizes(self):
+        all_dims_sizes = {}
+        for dim, tiles in self.tiles.items():
+            divided_dim = dim
+            for tile_name, tile_size in tiles.items():
+                if tile_size > 1:
+                    divided_dim = divided_dim // tile_size
+                    all_dims_sizes[tile_name] = tile_size
+            all_dims_sizes[dim]
+
+    @override
+    def check_consistency(self):
+        all_dims_sizes = {}
+        for dim, tiles in self.tiles.items():
+            assert dim in self.dims
+            divided_dim = self.dims[dim]
+            for tile_name, tile_size in tiles.items():
+                if tile_size == 1:
+                    tile_size = divided_dim
+                assert tile_size > 0
+                assert self.dims[dim] >= tile_size
+                assert self.dims[dim] % tile_size == 0
+                divided_dim = divided_dim // tile_size
+                all_dims_sizes[tile_name] = tile_size
+        #
+        for dim, ufactor in self.unrolling.items():
+            assert dim in all_dims_sizes
+            dim_size = all_dims_sizes[dim]
+            assert dim_size >= ufactor
+            assert dim_size % ufactor == 0
+
     @classmethod
     def _np_types_spec(
         cls, types: list[xdslAnyMemRefType]

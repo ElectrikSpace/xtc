@@ -40,11 +40,17 @@ class MlirGraphImplementer(MlirImplementer):
         for _, impl in self.nodes.items():
             impl.generate_node_unroll(handle)
 
+    @override
     def needs_vectorization(self):
         for impl in self.nodes.values():
             if impl.needs_vectorization():
                 return True
         return False
+
+    @override
+    def check_consistency(self):
+        for impl in self.nodes.values():
+            impl.check_consistency()
 
     @override
     def generate_tiling(self):
