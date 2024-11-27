@@ -1,4 +1,4 @@
-# Xdsl Transform
+# mlir-loop: high-level scheduling specifications in MLIR
 
 The ```mlir-loop``` tool provides a high-level syntax for
 controlling the scheduling of MLIR linear algebra (```linalg```)
