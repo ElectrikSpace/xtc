@@ -14,24 +14,31 @@ __all__ = [
     "Implementer",
 ]
 
-objdump_bin = "objdump"
+objdump_bin = 'objdump'
 
-objdump_opts = ["-d", "--no-addresses", "--no-show-raw-insn", "--visualize-jumps"]
-
-objdump_color_opts = [
-    "--visualize-jumps=color",
-    "--disassembler-color=on",
+objdump_opts = [
+    '-d',
+    '--no-addresses',
+    '--no-show-raw-insn',
+    '--visualize-jumps'
 ]
 
+objdump_color_opts = [
+    '--visualize-jumps=color',
+    '--disassembler-color=on',
+]
 
 class Implementer:
     def __init__(
-        self, source_op: Operation, dims: dict[str, int], parallel_dims: list[str]
+            self,
+            source_op: Operation,
+            dims: dict[str,int],
+            parallel_dims: list[str]
     ):
         self.op = source_op
         self.dims = dims
         self.parallel_dims = parallel_dims
-        self.tiles = {k: {k: v} for k, v in self.dims.items()}
+        self.tiles = {k:{k:v} for k,v in self.dims.items()}
         self.permutation = []
         self.vectorization = []
         self.parallelization = []
@@ -43,11 +50,14 @@ class Implementer:
     def payload_name(self):
         return self._payload_name
 
+    def implement(self):
+        pass
+    
     def _update_loops(self):
         loops = dict()
-        parallels = []
-        for tile_level in range(len(max(self.tiles.values(), key=len))):
-            for k, v in self.tiles.items():
+        parallels = []attribute unroll loop mlir
+        for tile_level in range(len(max(self.tiles.values(),key=len))):
+            for (k,v) in self.tiles.items():
                 if tile_level >= len(v):
                     continue
                 dim_name = list(v.keys())[tile_level]
@@ -57,25 +67,25 @@ class Implementer:
         self.working_dims = loops
         self.working_parallel_dims = parallels
         self.permutation = list(self.working_dims.keys())
-
+        
     def tile(
-        self,
-        dim: str,
-        tiles: dict[str, int],
+            self,
+            dim: str,
+            tiles: dict[str,int],
     ):
         ndims = list(tiles.keys())
         tiles_sizes = list(tiles.values())
-
-        assert len(ndims) == len(tiles_sizes)
+        
+        assert(len(ndims) == len(tiles_sizes))
 
         previous_tile_size = self.dims[dim]
         for ts in tiles_sizes:
-            assert previous_tile_size % ts == 0
+            assert(previous_tile_size%ts == 0)
             previous_tile_size = ts
-
+        
         dims = [dim] + ndims
         sizes = [self.dims[dim]] + tiles_sizes
-        for d, s in zip(dims, sizes):
+        for d,s in zip(dims,sizes):
             self.tiles[dim][d] = s
         self._update_loops()
 
@@ -84,15 +94,15 @@ class Implementer:
 
     def vectorize(self, vectorization: list[str]):
         for p in vectorization:
-            assert p in self.working_parallel_dims
+            assert(p in self.working_parallel_dims)
         self.vectorization = vectorization
 
     def parallelize(self, parallelization: list[str]):
         for p in parallelization:
-            assert p in self.working_parallel_dims
+            assert(p in self.working_parallel_dims)
         self.parallelization = parallelization
 
-    def unroll(self, unrolling: dict[str, int]):
+    def unroll(self, unrolling: dict[str,int]):
         self.unrolling = unrolling
 
     def compile_and_evaluate(self, **kwargs):
@@ -129,26 +139,32 @@ class Implementer:
                 fname = f"{self.op.operator.name}_compute_"
                 self.op.built.export_library(soname)
                 cmd_disassembler = (
-                    [objdump_bin] + [soname] + objdump_opts + [f"--disassemble={fname}"]
+                    [objdump_bin]
+                    + [soname]
+                    + objdump_opts
+                    + [f'--disassemble={fname}']
                 )
                 if color:
                     cmd_disassembler += objdump_color_opts
                 print("Running", " ".join(cmd_disassembler))
-                subprocess.run(cmd_disassembler, text=True)
+                subprocess.run(
+                    cmd_disassembler,
+                    text=True
+                )
         if dump_file is not None:
             assert not executable, f"executable generation not supported yet for TVM"
             if shared_lib:
                 self.op.built.export_library(f"{dump_file}.so")
 
     def load_and_evaluate(
-        self,
-        dll,
-        sym,
-        repeat=1,
-        min_repeat_ms=0,
-        number=1,
-        validate=False,
-        parameters=None,
+            self,
+            dll,
+            sym,
+            repeat = 1,
+            min_repeat_ms = 0,
+            number = 1,
+            validate = False,
+            parameters = None,
     ):
         results, code, error = self.load_and_eval(
             dll,
@@ -164,35 +180,22 @@ class Implementer:
         else:
             return error
 
-    def load_and_eval(
-        self,
-        dll,
-        sym,
-        repeat=1,
-        min_repeat_ms=0,
-        number=1,
-        validate=False,
-        parameters=None,
-    ):
-        results, code, error = self.op.run_eval_dll(
-            dll,
-            sym,
-            repeat=repeat,
-            number=number,
-            min_repeat_ms=min_repeat_ms,
-            validate=validate,
-            parameters=parameters,
-        )
+    def load_and_eval(self,
+                          dll,
+                          sym,
+                          repeat=1,
+                          min_repeat_ms=0,
+                          number=1,
+                          validate=False,
+                          parameters=None):
+        results, code, error = self.op.run_eval_dll(dll, sym, repeat=repeat, number=number, min_repeat_ms=min_repeat_ms, validate=validate, parameters=parameters)
         return results, code, error
 
     def dump_schedule(self, obj=None, outf=sys.stdout):
         if obj is None:
             obj = "imp"
             clsname = self.__class__.__name__
-            print(
-                f"{obj} = {clsname}(source_op={repr(self.op)}, dims={self.dims}, parallel_dims={self.parallel_dims})",
-                file=outf,
-            )
+            print(f"{obj} = {clsname}(source_op={repr(self.op)}, dims={self.dims}, parallel_dims={self.parallel_dims})", file=outf)
         for dim, tiles in self.tiles.items():
             t_tiles = {k: v for i, (k, v) in enumerate(tiles.items()) if i >= 1}
             print(f"{obj}.tile('{dim}', {t_tiles})", file=outf)
@@ -200,22 +203,19 @@ class Implementer:
         print(f"{obj}.vectorize({self.vectorization})", file=outf)
         print(f"{obj}.unroll({self.unrolling})", file=outf)
         print(f"{obj}.parallelize({self.parallelization})", file=outf)
-
+            
     def dump_tvm_schedule(self, obj="obj", sch="sch", outf=sys.stdout):
         print(f"O = {obj}[-1]", file=outf)
         parallel_axes = [k for k in self.dims.keys() if k in self.parallel_dims]
         reduction_axes = [k for k in self.dims.keys() if k not in self.parallel_dims]
         print(f"{', '.join(parallel_axes)}, = O.op.axis", file=outf)
         if reduction_axes:
-            print(f"{', '.join(reduction_axes)}, = O.op.reduce_axis", file=outf)
+            print(f"{', '.join(reduction_axes)}, = O.op.reduce_axis", file=outf) 
         for dim, tiles in self.tiles.items():
             t_sizes = list(tiles.values())
             t_axes = [dim] + list(tiles.keys())
             for idx in range(1, len(tiles)):
-                print(
-                    f"{t_axes[idx]}, {t_axes[idx + 1]} = {sch}[O].split({t_axes[idx]}, factor={t_sizes[idx]})",
-                    file=outf,
-                )
+                print(f"{t_axes[idx]}, {t_axes[idx+1]} = {sch}[O].split({t_axes[idx]}, factor={t_sizes[idx]})", file=outf)
         print(f"{sch}[O].reorder({', '.join(self.permutation)})", file=outf)
         for axis in self.vectorization:
             print(f"{sch}[O].vectorize({axis})", file=outf)
@@ -223,10 +223,7 @@ class Implementer:
             print(f"{sch}[O].unroll({axis})", file=outf)
         if self.parallelization:
             if len(self.parallelization) > 1:
-                print(
-                    f"{self.parallelization[0]} = {sch}[O].fuse({', '.join(self.parallelization)})",
-                    file=outf,
-                )
+                print(f"{self.parallelization[0]} = {sch}[O].fuse({', '.join(self.parallelization)})", file=outf)
             print(f"{sch}[O].parallel({self.parallelization[0]})", file=outf)
 
     def np_inputs_spec(self):
@@ -235,38 +232,35 @@ class Implementer:
     def np_outputs_spec(self):
         return self.op.np_outputs_spec()
 
-
 def _test_generate_tiling_1():
     dims = {"i": 256, "j": 256, "k": 512}
-    parallel_dims = ["i", "j"]
+    parallel_dims=["i", "j"]
     op = Operation(Operators.matmul, (*list(dims.values()), "float32"))
     imp_args = dict(source_op=op, dims=dims, parallel_dims=parallel_dims)
     imp = Implementer(**imp_args)
     imp.tile("i", {"i1": 4})
     imp.tile("j", {"j1": 64})
     imp.tile("k", {"k1": 8})
-    imp.interchange(["i", "j", "k", "k1", "i1", "j1"])
-    imp.vectorize(["j1"])
-    imp.parallelize(["i", "j"])
-    imp.unroll({"i1": 4, "k1": 8})
+    imp.interchange(['i', 'j', 'k', 'k1', 'i1', 'j1'])
+    imp.vectorize(['j1'])
+    imp.parallelize(['i', 'j'])
+    imp.unroll({'i1': 4, 'k1': 8})
     return imp, imp_args
-
 
 def _test_generate_tiling_2():
     dims = {"i": 256, "j": 256, "k": 512}
-    parallel_dims = ["i", "j"]
+    parallel_dims=["i", "j"]
     op = Operation(Operators.matmul, (*list(dims.values()), "float32"))
     imp_args = dict(source_op=op, dims=dims, parallel_dims=parallel_dims)
     imp = Implementer(**imp_args)
     imp.tile("i", {"i1": 128, "i2": 4})
     imp.tile("j", {"j1": 128, "j2": 64})
     imp.tile("k", {"k1": 8})
-    imp.interchange(["i", "j", "k", "i1", "j1", "k1", "i2", "j2"])
-    imp.vectorize(["j2"])
-    imp.parallelize(["i", "j"])
-    imp.unroll({"i2": 4, "k1": 8})
+    imp.interchange(['i', 'j', 'k', 'i1', 'j1', 'k1', 'i2', 'j2'])
+    imp.vectorize(['j2'])
+    imp.parallelize(['i', 'j'])
+    imp.unroll({'i2': 4, 'k1': 8})
     return imp, imp_args
-
 
 def _test_self_schedule(imp, imp_args):
     print("Raw schedule 1")
@@ -280,19 +274,16 @@ def _test_self_schedule(imp, imp_args):
     io2 = StringIO()
     imp2.dump_schedule(obj="imp", outf=io2)
     assert io.getvalue() == io2.getvalue(), f"self dump schedule not equal"
-
-
+    
 def test_self_schedule():
     imp, imp_args = _test_generate_tiling_1()
     _test_self_schedule(imp, imp_args)
     imp, imp_args = _test_generate_tiling_2()
     _test_self_schedule(imp, imp_args)
 
-
 def _test_tvm_schedule(imp, imp_args):
     print("Raw TVM schedule 1")
     imp.dump_tvm_schedule()
-
 
 def test_tvm_schedule():
     imp, imp_args = _test_generate_tiling_1()
@@ -300,11 +291,9 @@ def test_tvm_schedule():
     imp, imp_args = _test_generate_tiling_2()
     _test_tvm_schedule(imp, imp_args)
 
-
 def _test_tvm_evaluate(imp, imp_args):
     time = imp.evaluate()
     print(f"Execution time: {time} secs")
-
 
 def test_tvm_evaluate():
     imp, imp_args = _test_generate_tiling_1()
@@ -312,7 +301,7 @@ def test_tvm_evaluate():
     imp, imp_args = _test_generate_tiling_2()
     _test_tvm_evaluate(imp, imp_args)
 
-
+    
 if __name__ == "__main__":
     test_self_schedule()
     test_tvm_schedule()

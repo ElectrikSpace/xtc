@@ -13,6 +13,7 @@ from xdsl.dialects import func as xdslfunc
 from mlir.dialects.transform import (
     structured,
     vector,
+    memref,
     get_parent_op,
 )
 
@@ -46,6 +47,9 @@ class MlirImplementer(MlirModule, ABC):
         )
         if self.always_vectorize or self.needs_vectorization():
             handle = structured.VectorizeChildrenAndApplyPatternsOp(handle)
+            # with InsertionPoint(transform.ApplyPatternsOp(handle).patterns):
+            #     memref.ApplyFoldMemrefAliasOpsPatternsOp()
+            # handle = structured.HoistRedundantVectorTransfersOp(target=handle,transformed=transform.AnyOpType.get())
             with InsertionPoint(transform.ApplyPatternsOp(handle).patterns):
                 vector.ApplyLowerOuterProductPatternsOp()
                 vector.ApplyLowerContractionPatternsOp()
@@ -75,13 +79,17 @@ class MlirImplementer(MlirModule, ABC):
             self.loc,
         ):
             handle = self.generate_tiling()
-            self.generate_unroll(handle)
             handle = self.generate_vectorization(handle)
+            self.generate_unroll(handle)
             for p in self.concluding_passes:
                 handle = transform.ApplyRegisteredPassOp(
                     transform.AnyOpType.get(), handle, pass_name=p
                 )
             transform.YieldOp([])
+
+    @abstractmethod
+    def string_of_schedule(self):
+        pass
 
     @abstractmethod
     def np_inputs_spec(self) -> list[dict[str, tuple[int, ...] | str]]:

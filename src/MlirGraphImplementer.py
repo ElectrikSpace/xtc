@@ -35,6 +35,12 @@ class MlirGraphImplementer(MlirImplementer):
             no_alias=no_alias,
         )
 
+    def string_of_schedule(self):
+        res = ""
+        for impl in self.nodes.values():
+            res += impl.string_of_schedule() + "\n"
+        return res
+
     @override
     def generate_unroll(self, handle):
         for _, impl in self.nodes.items():

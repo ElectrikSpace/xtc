@@ -189,6 +189,7 @@ def tile_strategy_3d(impl, op_args, in_x):
         impl.parallelize(parallel_axes)
     impl.vectorize(vector_axes)
     impl.unroll(unroll_axes)
+    impl.implement()
 
 
 def tile_generator_3d(op_args, size=None):
@@ -251,6 +252,7 @@ def tile_strategy_4d(impl, op_args, in_x):
     if vector_axes is not None:
         impl.vectorize(vector_axes)
     impl.unroll(unroll_axes)
+    impl.implement()
 
 
 def tile_generator_4d(op_args, size=None):
@@ -318,6 +320,7 @@ def tile_strategy_7d(impl, op_args, in_x):
         impl.parallelize(parallel_axes)
     impl.vectorize(vector_axes)
     impl.unroll(unroll_axes)
+    impl.implement()
 
 
 def tile_generator_7d(op_args, size=None):

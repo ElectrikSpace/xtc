@@ -5,3 +5,4 @@ py-cpuinfo
 tqdm
 typing_extensions
 pyyaml
+xdsl

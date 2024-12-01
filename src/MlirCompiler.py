@@ -33,13 +33,19 @@ from ext_tools import (
     objdump_color_opts,
 )
 
-from MlirModule import MlirModule
+from MlirModule import RawMlirModule
 
 
 class MlirCompiler:
-    def __init__(self, mlir_module: MlirModule, mlir_install_dir: str):
+    def __init__(
+        self,
+        mlir_module: RawMlirModule,
+        mlir_install_dir: str,
+        to_disassemble: str | None = None,
+    ):
         self.mlir_module = mlir_module
         self.mlir_install_dir = mlir_install_dir
+        self.to_disassemble = to_disassemble
 
     @property
     def cmd_cc(self):
@@ -78,7 +84,10 @@ class MlirCompiler:
 
     @property
     def disassemble_option(self):
-        return f"--disassemble={self.payload_name}"
+        if self.to_disassemble is None:
+            return "--disassemble"
+        else:
+            return f"--disassemble={self.to_disassemble}"
 
     def build_disassemble_extra_opts(
         self,
@@ -172,9 +181,6 @@ class MlirCompiler:
             result = subprocess.run(cmd, text=True)
         return result
 
-    def implement(self, measure: bool):
-        pass
-
     def evaluate(
         self,
         print_source_ir: bool = False,
@@ -186,7 +192,6 @@ class MlirCompiler:
         print_lowered_ir: bool = False,
     ):
         exe_dump_file = f"{dump_file}.o"
-        self.mlir_module.implement(measure=True)
         self.mlir_compile(
             print_source_ir=print_source_ir,
             print_transformed_ir=print_transformed_ir,
@@ -236,8 +241,6 @@ class MlirCompiler:
         so_dump_file = f"{dump_file}.so"
         exe_c_file = f"{dump_file}.main.c"
         exe_dump_file = f"{dump_file}.out"
-
-        self.mlir_module.implement(measure=False)
 
         self.mlir_compile(
             print_source_ir=print_source_ir,

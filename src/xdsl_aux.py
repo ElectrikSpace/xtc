@@ -9,7 +9,7 @@ from xdsl.ir import (
     Region,
     Operation,
 )
-from xdsl.dialects.arith import Constant
+from xdsl.dialects.arith import ConstantOp
 from xdsl.dialects.builtin import (
     AnyMemRefType,
     AnyIntegerAttr,
@@ -67,7 +67,7 @@ def xdsl_operator_to_function(source_op: Operation, name: str) -> func.FuncOp:
                 attr = AnyIntegerAttr(0, scalar_types[scalar_count])
             else:
                 attr = FloatAttr(0.0, scalar_types[scalar_count])
-            constant = Constant(attr)
+            constant = ConstantOp(attr)
             payload.add_ops([constant])
             concrete_operands.append(constant.results[0])
             scalar_count += 1
@@ -75,7 +75,7 @@ def xdsl_operator_to_function(source_op: Operation, name: str) -> func.FuncOp:
     value_mapper = {o: p for o, p in zip(operands, concrete_operands)}
 
     new_op = source_op.clone(value_mapper=value_mapper)
-    payload.add_ops([new_op, func.Return()])
+    payload.add_ops([new_op, func.ReturnOp()])
     payload_func = func.FuncOp(
         name=name,
         function_type=(shaped_types, ()),

@@ -1,7 +1,7 @@
 [project]
 name = "mlir_loop"
 version = "0.1"
-dependencies = ['matplotlib', 'numpy', 'ordered-set', 'py-cpuinfo', 'tqdm', 'typing_extensions', 'pyyaml','lit','filecheck']
+dependencies = ['matplotlib', 'numpy', 'ordered-set', 'py-cpuinfo', 'tqdm', 'typing_extensions', 'pyyaml','lit','filecheck','xdsl']
 
 [tool.setuptools]
 platforms = ["Linux"]
@@ -12,6 +12,7 @@ mlir_loop = ["py.typed"]
 
 [project.scripts]
 mlir-loop = "mlir_loop:main"
+backend = "backend:main"
 loop-display = "display_results:main"
 loop-explore = "explore:main"
 
