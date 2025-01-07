@@ -40,11 +40,6 @@ class MlirImplementer(MlirModule, ABC):
         return self.payload_name
 
     def generate_vectorization(self, handle):
-        handle = get_parent_op(
-            transform.AnyOpType.get(),
-            handle,
-            isolated_from_above=True,
-        )
         if self.always_vectorize or self.needs_vectorization():
             handle = structured.VectorizeChildrenAndApplyPatternsOp(handle)
             # with InsertionPoint(transform.ApplyPatternsOp(handle).patterns):
@@ -79,6 +74,11 @@ class MlirImplementer(MlirModule, ABC):
             self.loc,
         ):
             handle = self.generate_tiling()
+            handle = get_parent_op(
+                transform.AnyOpType.get(),
+                handle,
+                isolated_from_above=True,
+            )
             handle = self.generate_vectorization(handle)
             self.generate_unroll(handle)
             for p in self.concluding_passes:
