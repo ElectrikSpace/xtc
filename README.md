@@ -93,15 +93,6 @@ Add the Python bindings to your PYTHONPATH:
 export PYTHONPATH=$PYTHONPATH:$HOME/bin/llvm/python_packages/mlir_core
 ```
 
-### XDSL
-
-```
-git clone https://github.com/xdslproject/xdsl
-cd xdsl
-git apply /path/to/each/patch
-pip install .
-```
-
 ### TVM backend requirements (optional)
 
 For using tvm backend, install TVM and do (on pinocchio use for instance TVM installed in `/opt/local/tvm/tvm-v0.16.0.rc0/`):
