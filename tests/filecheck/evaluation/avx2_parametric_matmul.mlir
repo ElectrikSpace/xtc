@@ -8,8 +8,6 @@ func.func @myfun(
   %cst = arith.constant 0.000000e+00 : f32
   linalg.fill
       {
-        loop.parallel_dims = ["i","j"],
-        loop.reduction_dims = [],
         loop.tiles_names = {"i" = [], "j" = ["j1"]},
         loop.tiles_sizes = {j1 = 8},
         loop.interchange = ["i","j","j1"],
@@ -20,8 +18,6 @@ func.func @myfun(
 
   linalg.matmul
     {
-      loop.parallel_dims = ["i","j"],
-      loop.reduction_dims = ["k"],
       loop.tiles_names = {"i" = [], "j" = ["j1"], "k" = ["k1"]},
       loop.tiles_sizes = {j1 = 64, k1 = 8},
       loop.interchange = ["i","j","k","k1","j1"],
