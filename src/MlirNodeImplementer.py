@@ -148,7 +148,8 @@ class MlirNodeImplementer(MlirImplementer):
                 self.vectorization.append(dim_vect)
 
     def parallelize(self, parallelization: list[str]):
-        self.parallelization = parallelization
+        ...
+        # self.parallelization = parallelization
 
     def unroll(self, unrolling: dict[str, int]):
         for dim, ufactor in unrolling.items():
