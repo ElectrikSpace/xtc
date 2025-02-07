@@ -21,9 +21,6 @@ func.func @myfun(
 ) {
   linalg.matmul
     {
-      loop.dims = {"i"=512,"j"=128,"k"=1024},
-      loop.parallel_dims = ["i","j"],
-      loop.reduction_dims = ["k"],
       loop.tiles_names = {"i" = ["i1"], "j" = ["j1"], "k" = ["k1"]},
       loop.tiles_sizes = {i1 = 4, j1 = 64, k1 = 8},
       loop.interchange = ["i","j","k","k1","i1","j1"],
