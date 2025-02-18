@@ -19,7 +19,7 @@ from runtime_types import (
     CNDArray,
 )
 
-runtime = utils.LazyImport("runtime")
+import runtime
 
 
 class NDArray:

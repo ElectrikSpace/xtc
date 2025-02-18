@@ -6,7 +6,7 @@ import numpy as np
 import ctypes
 import utils
 
-runtime = utils.LazyImport("runtime")
+import runtime
 
 __all__ = [
     "Evaluator",
