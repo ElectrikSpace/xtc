@@ -7,12 +7,28 @@ import ctypes
 import tempfile
 import subprocess
 import threading
+import shlex
+import logging
 
 __all__ = [
     "compile_runtime",
 ]
 
+logger = logging.getLogger(__name__)
+
+# Can be set to True for RUNTIME_DEBUG
+RUNTIME_DEBUG = False
+
 from runtime_types import DLDevice, DLDataType
+
+
+class _c_ascii_str:
+    @staticmethod
+    def from_param(obj):
+        if isinstance(obj, str):
+            obj = obj.encode("ascii")
+        return ctypes.c_char_p.from_param(obj)
+
 
 _runtime_funcs = {
     "evaluate": {
@@ -81,29 +97,29 @@ _runtime_funcs = {
         ],
         "restype": None,
     },
+    "evaluate_flops": {
+        "sym": "evaluate_flops",
+        "argtypes": [
+            _c_ascii_str,
+        ],
+        "restype": ctypes.c_double,
+    },
 }
 
 
 def compile_runtime(out_dll):
-    debug = False  # True for verbose
-    debug_opts = ["-DRUNTIME_DEBUG=1"] if debug else []
-    files = ["evaluate.c", "cndarray.c", "alloc.c"]
+    debug_opts = "-DRUNTIME_DEBUG=1" if RUNTIME_DEBUG else ""
+    files = ["evaluate.c", "cndarray.c", "alloc.c", "fclock.c", "evaluate_flops.c"]
     src_dir = f"{os.path.dirname(__file__)}/ctools"
     src_files = [f"{src_dir}/{file}" for file in files]
-    cmd = [
-        "cc",
-        "--shared",
-        "-O2",
-        "-fPIC",
-        "-I",
-        src_dir,
-        *debug_opts,
-        "-o",
-        out_dll,
-        *src_files,
-    ]
-    p = subprocess.run(cmd, text=True)
-    assert p.returncode == 0, f"unable to compile runtime: {' '.join(cmd)}"
+    cmd = (
+        "cc --shared -O2 -march=native -fPIC "
+        f"-I{src_dir} {debug_opts} "
+        f"-o {out_dll} {' '.join(src_files)}"
+    )
+    logger.debug("Compiling runtime: %s", cmd)
+    p = subprocess.run(shlex.split(cmd), text=True)
+    assert p.returncode == 0, f"unable to compile runtime: {cmd}"
 
 
 _runtime_lib_lock = threading.Lock()
@@ -142,8 +158,16 @@ def _resolve_runtime():
             _runtime_entries[name] = getattr(_runtime_lib, func_info["sym"])
             _runtime_entries[name].argtypes = func_info["argtypes"]
             _runtime_entries[name].restype = func_info["restype"]
+            logger.debug(
+                "Registring runtime function: %s: %s -> %s",
+                name,
+                _runtime_entries[name].argtypes,
+                _runtime_entries[name].restype,
+            )
 
 
 def __getattr__(x):
-    _resolve_runtime()
-    return _runtime_entries[x]
+    if x in _runtime_funcs:
+        _resolve_runtime()
+        return _runtime_entries[x]
+    raise AttributeError(f"undefined runtime function: {x}")

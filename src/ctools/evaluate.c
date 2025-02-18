@@ -4,7 +4,8 @@
  */
 #include <assert.h>
 #include <stdint.h>
-#include <time.h>
+
+extern double fclock(void); /* from fclock.c */
 
 typedef void (*func0_t)();
 typedef void (*func1_t)(void *);
@@ -22,12 +23,6 @@ typedef union {
 } PackedArg;
 
 typedef int (*packed_func_t)(PackedArg *, int *, int,PackedArg *,int *);
-
-#define FCLOCK() ({					\
-      struct timespec ts_;				\
-      clock_gettime(CLOCK_MONOTONIC, &ts_);		\
-      (double)ts_.tv_sec + (double)ts_.tv_nsec / 1e9;	\
-    })
 
 #define mem_barrier() asm("":::"memory")
 
@@ -47,13 +42,13 @@ typedef int (*packed_func_t)(PackedArg *, int *, int,PackedArg *,int *);
     double elapsed;							\
     int attempts = number;						\
     while (1) {								\
-      elapsed = FCLOCK();						\
+      elapsed = fclock();						\
       for (int a = 0; a < attempts; a++) {				\
 	mem_barrier();							\
 	(void)func(__VA_ARGS__);					\
 	mem_barrier();							\
       }									\
-      elapsed = FCLOCK() - elapsed;					\
+      elapsed = fclock() - elapsed;					\
       if (elapsed * 1000 >= (double)min_repeat_ms)			\
 	break;								\
       attempts *= NUMBER_FACTOR;					\
