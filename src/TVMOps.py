@@ -18,11 +18,44 @@ import tvm
 import tvm.te as te
 
 
+def get_tvm_native_target_options() -> str:
+    """
+    Returm the tvm target options to pass to llvm.
+    """
+    from cpuinfo import get_cpu_info
+
+    info = get_cpu_info()
+    arch = info["arch_string_raw"]
+    flags = info["flags"]
+    cpu, attrs, triple = "", "", ""
+    if arch == "x86_64":
+        triple = "x86_64-linux-gnu"
+        if "avx512f" in flags:
+            cpu = "skylake-avx512"
+        elif "avx2" in flags:
+            cpu = "core-avx2"
+    elif arch == "aarch64":
+        triple = "aarch64-linux-gnu"
+        if "asimd" in flags:
+            cpu = "cortex-a72"
+            attrs = "+neon"
+    target_options = []
+    if triple:
+        target_options.append(f"-mtriple={triple}")
+    if cpu:
+        target_options.append(f"-mcpu={cpu}")
+    if attrs:
+        target_options.append(f"-mattrs={attrs}")
+    return " ".join(target_options)
+
+
 class Operation:
     def __init__(self, operator, args):
         self.operator = operator
         self.args = args
-        self.tgt = tvm.target.Target(target="llvm -mcpu=alderlake")
+        self.target_options = get_tvm_native_target_options()
+        self.target = "llvm"
+        self.tgt = tvm.target.Target(target=f"{self.target} {self.target_options}")
         self.dev = tvm.device(self.tgt.kind.name, 0)
         self.params = None
         self.sch = None
