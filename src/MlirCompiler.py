@@ -11,6 +11,7 @@ import numpy as np
 
 from xdsl.dialects import func as xdslfunc
 
+from mlir.dialects import arith, transform
 from mlir.dialects.transform import NamedSequenceOp
 from mlir.passmanager import PassManager
 
@@ -40,11 +41,11 @@ class MlirCompiler:
     def __init__(
         self,
         mlir_module: RawMlirModule,
-        mlir_install_dir: str,
+        mlir_install_dir: str | None = None,
         to_disassemble: str | None = None,
     ):
         self.mlir_module = mlir_module
-        self.mlir_install_dir = mlir_install_dir
+        self.mlir_install_dir = utils.get_mlir_prefix(mlir_install_dir)
         self.to_disassemble = to_disassemble
 
     @property
