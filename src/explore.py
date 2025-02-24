@@ -38,8 +38,22 @@ Different tiling strategies are available:
   - vectorize the inner axis
   - Always unroll the inner RP levels
 
-- tile4dv: 7D input vector with fixed ordering strategy inspired from Ansor sketches + vectorization
+- tile7dv: 7D input vector with fixed ordering strategy inspired from Ansor sketches + vectorization
   - same as tile7d where j inner >= VEC_SIZE elts
+
+- tile7dvr: 7D input vector with fixed ordering strategy inspired from Ansor sketches + vectorization
+  - same as tile7dv with some constraints
+
+- tile8d: 8D input vector where [0:7] corresponds to tile7d and last element is for a write buffer
+  - same as tile 7D for the first 7 elements
+  - last element is boolean for write buffer activation
+  - the order is: PP|RPRP where | is the location of the write buffer is any
+
+- tile8dv:
+  - same as tile8d with the constraints of tile7dv
+
+- tile8dvr:
+  - same as tile8d with the constraints of tile7dvr
 
 """
 
@@ -403,6 +417,48 @@ def tile_generator_4dv(op_args, size=None):
 def tile_strategy_7d(impl, op_args, in_x):
     # TODO: generalize: no need to be matmul specific as soon as
     # we have axes names
+    # actually PPRPRP -> i j i1 j1 k i2 j2 k1 i3 j3
+    # where the input vector is: i1 i2 i3 j1 j2 j3 k1
+    i, j, k, dtype = op_args
+    tiles_i = utils.factors_to_sizes(in_x[0:3])
+    tiles_j = utils.factors_to_sizes(in_x[3:6])
+    tiles_k = utils.factors_to_sizes(in_x[6:7])
+    tiles_i_dict = {f"i{i + 1}": v for i, v in enumerate(tiles_i)}
+    tiles_j_dict = {f"j{i + 1}": v for i, v in enumerate(tiles_j)}
+    tiles_k_dict = {f"k{i + 1}": v for i, v in enumerate(tiles_k)}
+    axes_order = ["i", "j", "i1", "j1", "k", "i2", "j2", "k1", "i3", "j3"]
+    vector_axes = axes_order[-1:]
+    parallel_axes = None
+    if THREADS > 1:
+        parallel_axes = axes_order[:2]
+    unroll_axes = {"i3": tiles_i[-1], "k1": tiles_k[-1]}
+    logger.debug(
+        "input: %s: tile i: %s, j: %s, k: %s, order: %s, vector: %s, parallel: %s, unroll: %s",
+        in_x,
+        tiles_i_dict,
+        tiles_j_dict,
+        tiles_k_dict,
+        axes_order,
+        vector_axes,
+        parallel_axes,
+        unroll_axes,
+    )
+    impl.tile("i", tiles_i_dict)
+    impl.tile("j", tiles_j_dict)
+    impl.tile("k", tiles_k_dict)
+    impl.interchange(axes_order)
+    if parallel_axes is not None:
+        impl.parallelize(parallel_axes)
+    impl.vectorize(vector_axes)
+    impl.unroll(unroll_axes)
+
+
+def tile_strategy_7d_wc(impl, op_args, in_x):
+    # TODO: generalize: no need to be matmul specific as soon as
+    # we have axes names
+    # actually PP|RPRP -> i j i1 j1 k i2 j2 k1 i3 j3
+    # where the input vector is: i1 i2 i3 j1 j2 j3 k1
+    # and where | is the write cache location
     i, j, k, dtype = op_args
     tiles_i = utils.factors_to_sizes(in_x[0:3])
     tiles_j = utils.factors_to_sizes(in_x[3:6])
@@ -431,6 +487,7 @@ def tile_strategy_7d(impl, op_args, in_x):
     impl.tile("j", tiles_j_dict)
     impl.tile("k", tiles_k_dict)
     impl.interchange(axes_order)
+    impl.buffer_at("j1", "write")
     if parallel_axes is not None:
         impl.parallelize(parallel_axes)
     impl.vectorize(vector_axes)
@@ -439,17 +496,55 @@ def tile_strategy_7d(impl, op_args, in_x):
 
 def tile_schedule_default_7d(opt_level, op_args):
     i, j, k, dtype = op_args
-    default_schedule = [1, 1, 1, 1, 1, 1, 1]
-    if opt_level >= 3:
+
+    def sched_o2():
         jtile = VEC_SIZE
-        itile = 2  # todo IPC
+        itile = 2
         ktile = 1
         idiv = i >= itile and i % itile == 0
         jdiv = j >= jtile and j % jtile == 0
         kdiv = k >= ktile and k % ktile == 0
         if idiv and jdiv and kdiv:
-            default_schedule = [1, 1, itile, 1, 1, jtile, ktile]
+            return [1, 1, itile, 1, 1, jtile, ktile]
+        return None
+
+    def sched_o3():
+        jtile = VEC_SIZE * 4
+        itile = 4
+        ktiles = utils.factors_enumeration(k, 1)
+        ktile = [x[0] for x in ktiles if x[0] <= 16][-1]
+        idiv = i >= itile and i % itile == 0
+        jdiv = j >= jtile and j % jtile == 0
+        kdiv = k >= ktile and k % ktile == 0
+        if idiv and jdiv and kdiv:
+            return [i // itile, 1, itile, 1, j // jtile, jtile, ktile]
+        return None
+
+    default_schedule = [1, 1, 1, 1, 1, 1, 1]
+    if opt_level >= 2:
+        o2 = sched_o2()
+        if o2:
+            default_schedule = o2
+        if opt_level >= 3:
+            o3 = sched_o3()
+            if o3:
+                default_schedule = o3
     return default_schedule
+
+
+def tile_schedule_default_8d(opt_level, op_args):
+    default_schedule = tile_schedule_default_7d(opt_level, op_args)
+    wc = 0
+    if opt_level >= 2:
+        wc = 1
+    return default_schedule + [wc]
+
+
+def tile_strategy_8d(impl, op_args, in_x):
+    if in_x[7] == 0:
+        return tile_strategy_7d(impl, op_args, in_x[:7])
+    else:
+        return tile_strategy_7d_wc(impl, op_args, in_x[:7])
 
 
 def tile_generator_7d(op_args, size=None):
@@ -501,6 +596,48 @@ def tile_generator_7dv(op_args, size=None):
     all_in_x = [x for x in all_in_x if x[5] >= VEC_SIZE]
     logger.debug(f"Filtered space size: {len(all_in_x)} for problem dims: {i}x{j}x{k}")
     return np.array(all_in_x)
+
+
+def tile_generator_7dvr(op_args, size=None):
+    MAX_VREG = 32
+    MAX_L1_ELTS = 32 * 1024 / 4  # where 4 is float size (todo)
+    MAX_L2_ELTS = 1024 * 1024 / 4  # where 4 is float size (todo)
+    i, j, k, dtype = op_args
+    all_in_x = tile_generator_7d(op_args)
+    # Keep only vectorized dims, i.e. x[5] (inner j) >= VEC_SIZE
+    all_in_x = [x for x in all_in_x if x[5] >= VEC_SIZE]
+    # Keep only inner i*j <= VEC_SIZE * MAX_REG
+    all_in_x = [x for x in all_in_x if x[2] * x[5] <= VEC_SIZE * MAX_VREG]
+    # Keep only inner k*i*j <= MAX_L1_ELTS
+    all_in_x = [x for x in all_in_x if x[2] * x[5] * x[6] <= MAX_L1_ELTS]
+    # Keep only inner 2 k*i*j <= MAX_L2_ELTS
+    all_in_x = [x for x in all_in_x if x[1] * x[2] * x[4] * x[5] * x[6] <= MAX_L2_ELTS]
+    # # If %64 set inner j to >= 64
+    # if j % 64 == 0:
+    #     all_in_x = [x for x in all_in_x if x[5] >= 64]
+    # # If %4 set inner i to >= 4
+    # if i % 4 == 0:
+    #     all_in_x = [x for x in all_in_x if x[2] >= 4]
+    logger.debug(f"Filtered space size: {len(all_in_x)} for problem dims: {i}x{j}x{k}")
+    return np.array(all_in_x)
+
+
+def tile_generator_8d(op_args, size=None):
+    for sample in tile_generator_7d(op_args):
+        yield np.hstack((sample, [0]))
+        yield np.hstack((sample, [1]))
+
+
+def tile_generator_8dv(op_args, size=None):
+    for sample in tile_generator_7dv(op_args):
+        yield np.hstack((sample, [0]))
+        yield np.hstack((sample, [1]))
+
+
+def tile_generator_8dvr(op_args, size=None):
+    for sample in tile_generator_7dvr(op_args):
+        yield np.hstack((sample, [0]))
+        yield np.hstack((sample, [1]))
 
 
 def get_eval_parameters(args):
@@ -834,6 +971,7 @@ def evaluate_all_parallel(tile_strategy, all_in_x, impls, op_args, args, callbac
 
 
 def evaluate_generate(tile_strategy, tile_generator, impls, op_args, args, callbacks):
+    assert args.search in ["exhaustive", "random"]
     gen_size = args.trials if args.search == "random" else None
     all_in_x = tile_generator(op_args, size=gen_size)
     all_in_x = np.array(list(all_in_x))  # convert list or generator to np.array
@@ -1033,6 +1171,26 @@ STRATEGIES = {
         "strategy": tile_strategy_7d,
         "generator": tile_generator_7dv,
         "schedule": tile_schedule_default_7d,
+    },
+    "tile7dvr": {
+        "strategy": tile_strategy_7d,
+        "generator": tile_generator_7dvr,
+        "schedule": tile_schedule_default_7d,
+    },
+    "tile8d": {
+        "strategy": tile_strategy_8d,
+        "generator": tile_generator_8d,
+        "schedule": tile_schedule_default_8d,
+    },
+    "tile8dv": {
+        "strategy": tile_strategy_8d,
+        "generator": tile_generator_8dv,
+        "schedule": tile_schedule_default_8d,
+    },
+    "tile8dvr": {
+        "strategy": tile_strategy_8d,
+        "generator": tile_generator_8dvr,
+        "schedule": tile_schedule_default_8d,
     },
 }
 
