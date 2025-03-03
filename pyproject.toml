@@ -1,7 +1,15 @@
 [project]
 name = "mlir_loop"
 version = "0.1"
-dependencies = ['matplotlib', 'numpy', 'ordered-set', 'py-cpuinfo', 'tqdm', 'typing_extensions', 'pyyaml','lit','filecheck','xdsl~=0.26.0']
+dependencies = ['jinja2', 'matplotlib', 'numpy', 'ordered-set', 'py-cpuinfo', 'tqdm', 'typing_extensions', 'pyyaml','lit','filecheck','xdsl~=0.26.0']
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = [
+    "filecheck",
+    "lit",
+    "pytest",
+]
 
 [tool.setuptools]
 platforms = ["Linux"]
