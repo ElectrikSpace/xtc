@@ -1335,6 +1335,9 @@ def setup_args(args):
     MAX_UNROLL = args.max_unroll
     VEC_SIZE = 16
 
+    if "tvm" in args.backends:
+        os.environ["TVM_NUM_THREADS"] = str(args.threads)
+
     if args.eval == "eval" and args.execute:
         args.eval_parameters = get_eval_parameters(args)
 
@@ -1470,8 +1473,8 @@ def main():
     parser.add_argument(
         "--child",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="internal flag for marking child execution",
+        default=True,
+        help="internal flag for marking child execution (obsolete)",
     )
     parser.add_argument(
         "--bare-ptr",
