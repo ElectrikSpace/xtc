@@ -149,9 +149,9 @@ def mlir_matmul_impl(i, j, k, ftype, graph):
     from xdsl.ir import Block, Region
     from xdsl.dialects.builtin import FunctionType, MemRefType, f32, f64
     from xdsl.dialects import func
-    from xtc.MlirGraphImplementer import MlirGraphImplementer
-    from xtc.MlirCompiler import MlirCompiler
-    from xtc.MlirNodeImplementer import MlirNodeImplementer
+    from xtc.backends.mlir.MlirGraphImplementer import MlirGraphImplementer
+    from xtc.backends.mlir.MlirCompiler import MlirCompiler
+    from xtc.backends.mlir.MlirNodeImplementer import MlirNodeImplementer
 
     mlir_nodes = {
         ident: MlirNodeImplementer(
@@ -170,14 +170,15 @@ def mlir_matmul_impl(i, j, k, ftype, graph):
         no_alias=True,
         always_vectorize=False,
     )
-    compiler = MlirCompiler(
-        mlir_module=impl,
-        to_disassemble=impl.payload_name,
-    )
-    node_scheduler = mlir_nodes["matmul"].get_scheduler()
-    scheduler = impl.get_scheduler()
+    # compiler = MlirCompiler(
+    #     mlir_module=impl,
+    #     to_disassemble=impl.payload_name,
+    # )
+    # node_scheduler = mlir_nodes["matmul"].get_scheduler()
+    # scheduler = impl.get_scheduler()
     source_op = mlir_nodes["matmul"].source_op
-    return impl, compiler, scheduler, node_scheduler, source_op, "mlir"
+    return impl, None, None, None, source_op, "mlir"
+    # return impl, compiler, scheduler, node_scheduler, source_op, "mlir"
 
 
 def tvm_matmul_graph(i, j, k, ftype, name="matmul"):
@@ -793,13 +794,20 @@ def compile_one(
         *op_args, operation
     )
     assert backend_name == backend
-    if node_scheduler is None:
-        node_scheduler = impl.get_scheduler()
+    assert node_scheduler is None
+    assert scheduler is None
+    assert compiler is None
+    scheduler = impl.get_scheduler()
+    node_scheduler = scheduler  # by default the output node is scheduled
     tile_strategy(node_scheduler, op_args, in_x)
-    if scheduler is None:
-        schedule = node_scheduler.schedule()
-    else:
-        schedule = scheduler.implement()
+    schedule = scheduler.schedule()
+    # if node_scheduler is None:
+    #     node_scheduler = impl.get_scheduler()
+    # tile_strategy(node_scheduler, op_args, in_x)
+    # if scheduler is None:
+    #     schedule = node_scheduler.schedule()
+    # else:
+    #     schedule = scheduler.implement()
     if dump_file is None:
         dump_file = f"{args.explore_dir}/payload_{ident}"
     compile_args = dict(
@@ -817,6 +825,7 @@ def compile_one(
                 print_lowered_ir=True,
                 print_assembly=True,
                 color=False,
+                to_disassemble=impl.payload_name,
             )
         )
     if args.save_temps:
@@ -827,12 +836,14 @@ def compile_one(
             )
         )
     assert args.eval == "eval"
-    if compiler is None:
-        compiler = impl.get_compiler(**compile_args)
-        module = compiler.compile(schedule=schedule)
-    else:
-        compiler.compile(schedule=schedule, **compile_args)
-        module = None
+    compiler = impl.get_compiler(**compile_args)
+    module = compiler.compile(schedule=schedule)
+    # if compiler is None:
+    #     compiler = impl.get_compiler(**compile_args)
+    #     module = compiler.compile(schedule=schedule)
+    # else:
+    #     compiler.compile(schedule=schedule, **compile_args)
+    #     module = None
     logger.debug("  Compile done: %s: %s.", ident, in_x)
     # For now we pass (module, impl) as not all implementation
     # provide module

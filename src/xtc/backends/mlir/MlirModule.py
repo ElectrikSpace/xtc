@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+from typing_extensions import override
 from xdsl.dialects import func as xdslfunc
 from mlir.dialects import func, builtin, arith, memref, linalg
 from mlir.ir import (
@@ -14,9 +15,7 @@ from mlir.ir import (
     IntegerType,
     UnitAttr,
 )
-from mlir.dialects import transform
 import numpy as np
-from xtc.xdsl_aux import brand_inputs_with_noalias
 
 
 class RawMlirModule:
@@ -33,16 +32,16 @@ class RawMlirModule:
     def mlir_module(self):
         return self.module
 
+    def check_consistency(self):
+        pass
+
 
 class MlirModule(RawMlirModule):
-    def __init__(self, xdsl_func: xdslfunc.FuncOp, no_alias: bool):
+    def __init__(self, xdsl_func: xdslfunc.FuncOp) -> None:
         super().__init__("module{}")
-        if no_alias:
-            brand_inputs_with_noalias(xdsl_func)
-        self.local_functions = {}
+        self.local_functions: dict[str, func.FuncOp] = {}
         self.parse_and_add_function(str(xdsl_func))
         self.payload_name = str(xdsl_func.sym_name).replace('"', "")
-        self.named_sequence: None | transform.NamedSequenceOp = None
 
     def parse_and_add_function(
         self,
@@ -57,32 +56,9 @@ class MlirModule(RawMlirModule):
         self.local_functions[str(name)] = payload_func
         return payload_func
 
+    @override
     def check_consistency(self):
-        return
-
-    def _implement(self):
-        transform.YieldOp([])
-        return
-
-    def implement(self):
-        self.check_consistency()
-        #
-        with InsertionPoint(self.mlir_module.body), self.mlir_context, self.loc:
-            self.mlir_module.operation.attributes["transform.with_named_sequence"] = (
-                UnitAttr.get()
-            )
-            self.named_sequence = transform.NamedSequenceOp(
-                "__transform_main",
-                [transform.AnyOpType.get()],
-                [],
-                arg_attrs=[{"transform.readonly": UnitAttr.get()}],
-            )
-        with (
-            InsertionPoint.at_block_begin(self.named_sequence.body),
-            self.mlir_context,
-            self.loc,
-        ):
-            self._implement()
+        pass
 
     def add_external_function(
         self,

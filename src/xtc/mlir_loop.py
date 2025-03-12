@@ -5,16 +5,19 @@
 #
 
 import argparse
-import os
+from pathlib import Path
 from xdsl.dialects import func, builtin
 from xdsl.ir import (
     Operation,
+    Data,
 )
+
 from xtc.xdsl_aux import parse_xdsl_module
-from xtc.MlirModule import MlirModule
-from xtc.MlirNodeImplementer import MlirNodeImplementer
-from xtc.MlirGraphImplementer import MlirGraphImplementer
-from xtc.MlirCompiler import MlirCompiler
+from xtc.backends.mlir import MlirModule
+from xtc.backends.mlir import MlirScheduler
+from xtc.backends.mlir import MlirNodeImplementer
+from xtc.backends.mlir import MlirGraphImplementer
+from xtc.backends.mlir import MlirCompiler
 
 
 def remove_attr(o: Operation, attr_name: str):
@@ -56,8 +59,9 @@ def extract_string_list_from_attr(o: Operation, attr_name: str) -> list[str]:
 def extract_string_int_dict_from_attr(o: Operation, attr_name: str) -> dict[str, int]:
     extracted_dict = {}
     if attr_name in o.attributes:
-        raw_dict = o.attributes[attr_name].data
-        for string, integer in raw_dict.items():
+        raw_dict = o.attributes[attr_name]
+        assert isinstance(raw_dict, builtin.DictionaryAttr)
+        for string, integer in raw_dict.data.items():
             assert isinstance(string, str) and isinstance(integer, builtin.IntegerAttr)
             extracted_dict[string] = integer.value.data
     return extracted_dict
@@ -95,18 +99,21 @@ def schedule_operation(
         id=parsed_id,
     )
 
+    sched = impl.get_scheduler()
+
     # Parse and process the tiling declarations
     tiles_sizes = extract_string_int_dict_from_attr(o, "loop.tiles_sizes")
     remove_attr(o, "loop.tiles_sizes")
     if "loop.tiles_names" in o.attributes:
+        assert isinstance(o.attributes["loop.tiles_names"], builtin.DictionaryAttr)
         for dim, ts in o.attributes["loop.tiles_names"].data.items():
             tiles_on_dim = {}
+            assert isinstance(ts, builtin.ArrayAttr)
             for t in ts:
                 size = tiles_sizes[t.data]
                 tiles_on_dim[t.data] = size
-            impl.tile(dim, tiles_on_dim)
+            sched.tile(dim, tiles_on_dim)
     remove_attr(o, "loop.tiles_names")
-
     # Parse the scheduling attributes
     interchange = extract_string_list_from_attr(o, "loop.interchange")
     vectorize = extract_string_list_from_attr(o, "loop.vectorize")
@@ -119,12 +126,12 @@ def schedule_operation(
 
     # Feed the scheduler
     if interchange:
-        impl.interchange(interchange)
-    impl.vectorize(vectorize)
-    impl.parallelize(parallelize)
-    impl.unroll(unroll)
+        sched.interchange(interchange)
+    sched.vectorize(vectorize)
+    sched.parallelize(parallelize)
+    sched.unroll(unroll)
 
-    return impl
+    return sched
 
 
 def main():
@@ -205,71 +212,69 @@ def main():
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.filename):
+    if not Path(args.filename).exists():
         parser.error(f"{args.filename} does not exist.")
     with open(args.filename, "r") as f:
         source = f.read()
     module = parse_xdsl_module(source)
     myfunc = select_xdsl_payload(module)
     annotated_operations = operations_to_schedule(myfunc)
-    if len(annotated_operations) > 0:
-        # Build the transform script
-        count = 0
-        impls = []
-        for o in annotated_operations:
-            implementer_name = f"v{count}"
-            count += 1
-            impl = schedule_operation(
-                o,
-                implementer_name,
-                always_vectorize=args.always_vectorize,
-                concluding_passes=args.concluding_passes,
-                no_alias=args.no_alias,
-                evaluate=args.evaluate,
-            )
-            impls.append(impl)
 
-        impl_module = MlirGraphImplementer(
+    # Build the transform script
+    count = 0
+    nodes_scheds = []
+    for op in annotated_operations:
+        implementer_name = f"v{count}"
+        count += 1
+        sched = schedule_operation(
+            op,
+            implementer_name,
             always_vectorize=args.always_vectorize,
-            xdsl_func=myfunc,
-            nodes=impls,
             concluding_passes=args.concluding_passes,
             no_alias=args.no_alias,
+            evaluate=args.evaluate,
         )
-    else:
-        impl_module = MlirModule(xdsl_func=myfunc, no_alias=args.no_alias)
+        nodes_scheds.append(sched)
 
-    if args.evaluate:
-        impl_module.measure_execution_time()
+    impl_graph = MlirGraphImplementer(
+        always_vectorize=args.always_vectorize,
+        xdsl_func=myfunc,
+        nodes=[sched.implementer for sched in nodes_scheds],
+        concluding_passes=args.concluding_passes,
+        no_alias=args.no_alias,
+    )
+    impl_scheduler = impl_graph.get_scheduler(nodes_schedulers=nodes_scheds)
+    impl_schedule = impl_scheduler.schedule()
 
-    # Apply the transform script
-    impl_module.implement()
-    compiler = MlirCompiler(
-        mlir_module=impl_module,
+    print_source = args.print_source_ir or (
+        not args.evaluate
+        and not (
+            args.print_transformed_ir or args.print_lowered_ir or args.print_assembly
+        )
+    )
+
+    dump_file = Path(args.filename).stem
+    compiler_args = dict(
         mlir_install_dir=args.llvm_dir,
-        to_disassemble=impl_module.payload_name,
+        to_disassemble=impl_graph.payload_name,
+        print_source_ir=print_source,
+        print_transformed_ir=args.print_transformed_ir,
+        print_lowered_ir=args.print_lowered_ir,
+        print_assembly=args.print_assembly,
+        color=args.color,
+        debug=args.debug,
+        dump_file=dump_file,
         arch=args.arch,
         microarch=args.microarch,
     )
     if args.evaluate:
-        e = compiler.evaluate(
-            print_source_ir=args.print_source_ir,
-            print_transformed_ir=args.print_transformed_ir,
-            print_lowered_ir=args.print_lowered_ir,
-            print_assembly=args.print_assembly,
-            color=args.color,
-            debug=args.debug,
-        )
-        print(e)
-    else:
-        print_source = args.print_source_ir or not (
-            args.print_transformed_ir or args.print_lowered_ir or args.print_assembly
-        )
-        e = compiler.compile(
-            print_source_ir=print_source,
-            print_transformed_ir=args.print_transformed_ir,
-            print_lowered_ir=args.print_lowered_ir,
-            print_assembly=args.print_assembly,
-            color=args.color,
-            debug=args.debug,
-        )
+        compiler_args.update(dict(shared_lib=True))
+
+    compiler = impl_graph.get_compiler(**compiler_args)
+    module = compiler.compile(impl_schedule)
+
+    if args.evaluate:
+        evaluator = module.get_evaluator()
+        res, code, err = evaluator.evaluate()
+        assert code == 0, f"evaluation error: {err}"
+        print(min(res))

@@ -43,8 +43,9 @@ test-xtc:
     - pip list
     - pyright
     - mypy
-    - lit -j1 -a tests/filecheck
+    - lit -a tests/filecheck
     - pytest tests/unit
+    - pytest tests/mlir
     - pytest tests/tvm
     - pytest tests/jir
     - scripts/explore/run-explore-variants.sh artifacts/explore/
