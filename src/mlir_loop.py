@@ -17,6 +17,11 @@ from MlirGraphImplementer import MlirGraphImplementer
 from MlirCompiler import MlirCompiler
 
 
+def remove_attr(o: Operation, attr_name: str):
+    if attr_name in o.attributes:
+        del o.attributes[attr_name]
+
+
 def select_xdsl_payload(module: builtin.ModuleOp) -> func.FuncOp:
     myfunc = None
     for o in module.walk():
@@ -78,8 +83,11 @@ def schedule_operation(
     for dim in extract_string_list_from_attr(o, "loop.dims"):
         dims[dim] = None
     assert dims
+    remove_attr(o, "loop.dims")
     parallel_dims = extract_string_list_from_attr(o, "loop.parallel_dims")
+    remove_attr(o, "loop.parallel_dims")
     reduction_dims = extract_string_list_from_attr(o, "loop.reduction_dims")
+    remove_attr(o, "loop.reduction_dims")
     loop_stamps = extract_string_list_from_attr(o, "loop.add_attributes")
 
     impl = MlirNodeImplementer(
@@ -97,6 +105,7 @@ def schedule_operation(
 
     # Parse and process the tiling declarations
     tiles_sizes = extract_string_int_dict_from_attr(o, "loop.tiles_sizes")
+    remove_attr(o, "loop.tiles_sizes")
     if "loop.tiles_names" in o.attributes:
         for dim, ts in o.attributes["loop.tiles_names"].data.items():
             tiles_on_dim = {}
@@ -104,12 +113,17 @@ def schedule_operation(
                 size = tiles_sizes[t.data]
                 tiles_on_dim[t.data] = size
             impl.tile(dim, tiles_on_dim)
+    remove_attr(o, "loop.tiles_names")
 
     # Parse the scheduling attributes
     interchange = extract_string_list_from_attr(o, "loop.interchange")
     vectorize = extract_string_list_from_attr(o, "loop.vectorize")
     parallelize = extract_string_list_from_attr(o, "loop.parallelize")
     unroll = extract_string_int_dict_from_attr(o, "loop.unroll")
+    remove_attr(o, "loop.interchange")
+    remove_attr(o, "loop.vectorize")
+    remove_attr(o, "loop.parallelize")
+    remove_attr(o, "loop.unroll")
 
     # Feed the scheduler
     if interchange:
