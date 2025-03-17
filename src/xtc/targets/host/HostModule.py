@@ -7,32 +7,33 @@ from typing_extensions import override
 
 import xtc.itf as itf
 
-from .JIROps import JIROperation
-from .JIREvaluator import JIRExecutor, JIREvaluator
+from .HostEvaluator import HostExecutor, HostEvaluator
+
 
 __all__ = [
-    "JIRModule",
+    "HostModule",
 ]
 
 
-class JIRModule(itf.comp.Module):
+class HostModule(itf.comp.Module):
     def __init__(
         self,
-        operation: JIROperation,
         name: str,
         payload_name: str,
         file_name: str,
         file_type: str,
         **kwargs: Any,
     ) -> None:
-        self._operation = operation
         self._name = name
         self._payload_name = payload_name
         self._file_name = file_name
         self._file_type = file_type
         assert self._file_type == "shlib", "only support shlib for JIR Module"
         assert self._file_name.endswith(".so"), "file name is not a shlib"
-        self._bare_ptr = True
+        self._bare_ptr = kwargs.get("bare_ptr", True)
+        self._np_inputs_spec = kwargs.get("np_inputs_spec")
+        self._np_outputs_spec = kwargs.get("np_outputs_spec")
+        self._reference_impl = kwargs.get("reference_impl")
 
     @property
     @override
@@ -60,8 +61,14 @@ class JIRModule(itf.comp.Module):
 
     @override
     def get_evaluator(self, **kwargs: Any) -> itf.exec.Evaluator:
-        return JIREvaluator(self, **kwargs)
+        return HostEvaluator(
+            self,
+            **kwargs,
+        )
 
     @override
     def get_executor(self, **kwargs: Any) -> itf.exec.Executor:
-        return JIRExecutor(self, **kwargs)
+        return HostExecutor(
+            self,
+            **kwargs,
+        )

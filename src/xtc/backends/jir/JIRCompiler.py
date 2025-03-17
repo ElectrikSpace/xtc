@@ -28,6 +28,8 @@ from jir.backend.util.merge_mlir_modules import merge_mlir_modules_by_content
 from jir.transform.primitives.canonicalize import canonicalize
 import jir.transform.command as command
 
+from xtc.targets.host import HostModule
+
 import xtc.backends.jir as backend
 import xtc.itf as itf
 
@@ -40,7 +42,6 @@ from xtc.ext_tools import (
     shared_lib_opts,
 )
 
-from .JIRModule import JIRModule
 from .JIRScheduler import JIRSchedule
 
 __all__ = [
@@ -159,13 +160,15 @@ class JIRCompiler(itf.comp.Compiler):
         with open(library_path, "wb") as out:
             out.write(compiled_so)
 
-        return JIRModule(
-            source_op,
+        return HostModule(
             dump_base,
             func_name,
             f"{lib_path}.so",
             "shlib",
             bare_ptr=self.bare_ptr,
+            np_inputs_spec=source_op.np_inputs_spec,
+            np_outputs_spec=source_op.np_outputs_spec,
+            reference_impl=source_op.reference_impl,
         )
 
     def _compile_jir_module(

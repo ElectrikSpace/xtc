@@ -9,10 +9,11 @@ from pathlib import Path
 import subprocess
 import shlex
 
+from xtc.targets.host import HostModule
+
 import xtc.backends.tvm as backend
 import xtc.itf as itf
 
-from .TVMModule import TVMModule
 from .TVMOps import TVMOperation
 
 __all__ = [
@@ -119,8 +120,15 @@ class TVMCompiler(itf.comp.Compiler):
             )
             wrapper.build(lib_path)
 
-        return TVMModule(
-            op, dump_base, func_name, f"{lib_path}.so", "shlib", bare_ptr=self.bare_ptr
+        return HostModule(
+            dump_base,
+            func_name,
+            f"{lib_path}.so",
+            "shlib",
+            bare_ptr=self.bare_ptr,
+            np_inputs_spec=op.np_inputs_spec,
+            np_outputs_spec=op.np_outputs_spec,
+            reference_impl=op.reference_impl,
         )
 
 
