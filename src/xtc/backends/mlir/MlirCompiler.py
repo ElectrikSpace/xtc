@@ -30,13 +30,13 @@ from mlir.ir import (
 )
 
 
-from xtc.xdsl_aux import brand_inputs_with_noalias
+from xtc.utils.xdsl_aux import brand_inputs_with_noalias
 
 from xtc.utils.tools import (
     get_mlir_prefix,
 )
 
-from xtc.ext_tools import (
+from xtc.utils.ext_tools import (
     transform_opts,
     lowering_opts,
     mlirtranslate_opts,

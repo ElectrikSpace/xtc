@@ -9,7 +9,7 @@ import numpy as np
 from xdsl.ir import Operation as xdslOperation
 from xdsl.dialects.builtin import AnyMemRefType as xdslAnyMemRefType
 from xdsl.dialects.builtin import UnitAttr as xdslUnitAttr
-from xtc.xdsl_aux import xdsl_operator_to_function
+from xtc.utils.xdsl_aux import xdsl_operator_to_function
 
 import xtc.itf as itf
 
