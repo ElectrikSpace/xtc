@@ -28,6 +28,7 @@ from ext_tools import (
     dump_file,
     mlirrunner_opts,
     objdump_bin,
+    objdump_arm_bin,
     cc_bin,
     objdump_opts,
     objdump_color_opts,
@@ -42,10 +43,14 @@ class MlirCompiler:
         mlir_module: RawMlirModule,
         mlir_install_dir: str | None = None,
         to_disassemble: str | None = None,
+        arch: str = "native",
+        microarch: str = "native",
     ):
         self.mlir_module = mlir_module
         self.mlir_install_dir = utils.get_mlir_prefix(mlir_install_dir)
         self.to_disassemble = to_disassemble
+        self.arch = arch
+        self.microarch = microarch
 
     @property
     def cmd_cc(self):
@@ -53,11 +58,17 @@ class MlirCompiler:
 
     @property
     def cmd_opt(self):
-        return [f"{self.mlir_install_dir}/bin/opt"] + opt_opts
+        opt = [f"{self.mlir_install_dir}/bin/opt"]
+        return opt + opt_opts + [f"-march={self.arch}", f"--mcpu={self.microarch}"]
 
     @property
     def cmd_llc(self):
-        return [f"{self.mlir_install_dir}/bin/llc"] + llc_opts
+        llc = [f"{self.mlir_install_dir}/bin/llc"]
+        if self.arch == "native":
+            llc_arch = [f"--mcpu={self.microarch}"]
+        else:
+            llc_arch = [f"-march={self.arch}", f"--mcpu={self.microarch}"]
+        return llc + llc_opts + llc_arch
 
     @property
     def cmd_mlirtranslate(self):
@@ -153,8 +164,8 @@ class MlirCompiler:
             obj_file=obj_file, color=color
         )
         symbol = [f"{self.disassemble_option}"]
-        disassemble_cmd = [objdump_bin] + objdump_opts + symbol + disassemble_extra_opts
-        print(" ".join(disassemble_cmd))
+        objdump = objdump_arm_bin if self.arch == "aarch64" else objdump_bin
+        disassemble_cmd = [objdump] + objdump_opts + symbol + disassemble_extra_opts
         dis_process = self.execute_command(
             cmd=disassemble_cmd, pipe_stdoutput=False, debug=debug
         )

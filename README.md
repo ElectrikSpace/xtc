@@ -52,7 +52,7 @@ one relies on upstream MLIR bindings.
 
 Ensure installation of minimal required dependencies on the distribution:
 
-    sudo apt install python3 pybind11-dev libxml2-dev build-essential libomp5
+    sudo apt install python3 pybind11-dev libxml2-dev build-essential libomp5 binutils binutils-aarch64-linux-gnu
 
 Setup a virtual python environment with python >= 3.10,
 and install base requirements, for instance:

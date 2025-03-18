@@ -48,9 +48,14 @@ lowering_opts = [
 
 mlirtranslate_opts = ["--mlir-to-llvmir"]
 
-llc_opts = ["-O3", "-filetype=obj", "--mcpu=native"]
+llc_opts = [
+    "-O3",
+    "-filetype=obj",
+]
 
-opt_opts = ["-O3", "--march=native"]
+opt_opts = [
+    "-O3",
+]
 
 cc_opts = ["-O3", "-march=native"]
 
@@ -76,6 +81,8 @@ mlirrunner_opts = [
 ]
 
 objdump_bin = "objdump"
+
+objdump_arm_bin = "aarch64-linux-gnu-objdump"
 
 cc_bin = "cc"
 
