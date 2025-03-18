@@ -78,23 +78,15 @@ def schedule_operation(
             parsed_id = attr_name
 
     # Parse the initial specification
-    dims: dict[str, int | None] = {}
     assert "loop.dims" in o.attributes
-    for dim in extract_string_list_from_attr(o, "loop.dims"):
-        dims[dim] = None
+    dims = extract_string_list_from_attr(o, "loop.dims")
     assert dims
     remove_attr(o, "loop.dims")
-    parallel_dims = extract_string_list_from_attr(o, "loop.parallel_dims")
-    remove_attr(o, "loop.parallel_dims")
-    reduction_dims = extract_string_list_from_attr(o, "loop.reduction_dims")
-    remove_attr(o, "loop.reduction_dims")
     loop_stamps = extract_string_list_from_attr(o, "loop.add_attributes")
 
     impl = MlirNodeImplementer(
         source_op=o,
         dims=dims,
-        parallel_dims=parallel_dims,
-        reduction_dims=reduction_dims,
         always_vectorize=always_vectorize,
         payload_name=implementer_name,
         concluding_passes=concluding_passes,

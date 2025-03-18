@@ -29,11 +29,7 @@ class MlirNodeImplementer(MlirImplementer):
     def __init__(
         self,
         source_op: xdslOperation,
-        # TODO: Should become a list.
-        dims: dict[str, int | None],
-        # TODO: Useless. Should be removed.
-        parallel_dims: list[str],
-        reduction_dims: list[str],
+        dims: list[str],
         payload_name: str = "f",
         concluding_passes: list[str] = [],
         loop_stamps: list[str] = [],
@@ -60,7 +56,7 @@ class MlirNodeImplementer(MlirImplementer):
         self.source_op = source_op
         # Specification of transformations
         self.loop_stamps = loop_stamps
-        self.dims = list(dims.keys())
+        self.dims = dims
         self.tiles = {k: {k: 1} for k in self.dims}
         self.permutation = self.get_default_interchange()
         self.vectorization = []
