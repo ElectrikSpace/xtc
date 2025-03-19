@@ -13,7 +13,6 @@ from mlir.ir import (
     FunctionType,
     F64Type,
     IntegerType,
-    UnitAttr,
 )
 import numpy as np
 
@@ -31,9 +30,6 @@ class RawMlirModule:
     @property
     def mlir_module(self):
         return self.module
-
-    def check_consistency(self):
-        pass
 
 
 class MlirModule(RawMlirModule):
@@ -55,10 +51,6 @@ class MlirModule(RawMlirModule):
         name = str(payload_func.name).replace('"', "")
         self.local_functions[str(name)] = payload_func
         return payload_func
-
-    @override
-    def check_consistency(self):
-        pass
 
     def add_external_function(
         self,
