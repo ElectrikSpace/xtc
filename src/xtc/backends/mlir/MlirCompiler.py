@@ -125,6 +125,7 @@ class MlirProgramCompiler:
         self.print_source_ir = kwargs.get("print_source_ir", False)
         self.print_transformed_ir = kwargs.get("print_transformed_ir", False)
         self.print_assembly = kwargs.get("print_assembly", False)
+        self.visualize_jumps = kwargs.get("visualize_jumps", True)
         self.print_lowered_ir = kwargs.get("print_lowered_ir", False)
         self.debug = kwargs.get("debug", False)
         self.color = kwargs.get("color", False)
@@ -134,7 +135,7 @@ class MlirProgramCompiler:
         self.concluding_passes = kwargs.get("concluding_passes", [])
         self.always_vectorize = kwargs.get("always_vectorize", False)
         self.arch = kwargs.get("arch", "native")
-        self.microarch = kwargs.get("microarch", "native")
+        self.cpu = kwargs.get("cpu", "native")
 
     @property
     def cmd_cc(self):
@@ -143,15 +144,15 @@ class MlirProgramCompiler:
     @property
     def cmd_opt(self):
         opt = [f"{self.mlir_install_dir}/bin/opt"]
-        return opt + opt_opts + [f"-march={self.arch}", f"--mcpu={self.microarch}"]
+        return opt + opt_opts + [f"-march={self.arch}", f"--mcpu={self.cpu}"]
 
     @property
     def cmd_llc(self):
         llc = [f"{self.mlir_install_dir}/bin/llc"]
         if self.arch == "native":
-            llc_arch = [f"--mcpu={self.microarch}"]
+            llc_arch = [f"--mcpu={self.cpu}"]
         else:
-            llc_arch = [f"-march={self.arch}", f"--mcpu={self.microarch}"]
+            llc_arch = [f"-march={self.arch}", f"--mcpu={self.cpu}"]
         return llc + llc_opts + llc_arch
 
     @property
@@ -187,6 +188,8 @@ class MlirProgramCompiler:
         obj_file: str,
     ) -> list[str]:
         disassemble_extra_opts = [obj_file]
+        if self.visualize_jumps:
+            disassemble_extra_opts += ["--visualize-jumps"]
         if self.color:
             disassemble_extra_opts += objdump_color_opts
         return disassemble_extra_opts
@@ -244,7 +247,6 @@ class MlirProgramCompiler:
         symbol = [f"{self.disassemble_option}"]
         objdump = objdump_arm_bin if self.arch == "aarch64" else objdump_bin
         disassemble_cmd = [objdump] + objdump_opts + symbol + disassemble_extra_opts
-        print(" ".join(disassemble_cmd))
         dis_process = self.execute_command(cmd=disassemble_cmd, pipe_stdoutput=False)
         return dis_process
 

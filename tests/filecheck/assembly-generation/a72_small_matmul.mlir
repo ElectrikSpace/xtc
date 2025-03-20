@@ -1,4 +1,4 @@
-// RUN: mlir-loop %s --no-alias --arch aarch64 --microarch cortex-a72 --print-assembly | filecheck %s
+// RUN: mlir-loop %s --no-alias --arch aarch64 --cpu cortex-a72 --print-assembly | filecheck %s
 
 func.func @myfun(
   %A: memref<4x4xf32>,
@@ -10,7 +10,7 @@ func.func @myfun(
     outs(%C : memref<4x4xf32>)
   return
 }
-// CHECK:  <myfun>:
+// CHECK:       <myfun>:
 // CHECK-NEXT:  	stp	d13, d12, [sp, #-48]!
 // CHECK-NEXT:  	stp	d11, d10, [sp, #16]
 // CHECK-NEXT:  	stp	d9, d8, [sp, #32]
