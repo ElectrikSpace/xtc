@@ -204,6 +204,11 @@ def main():
     )
     parser.add_argument("--color", action="store_true", help="Allow colors.")
     parser.add_argument(
+        "--hide-jumps",
+        action="store_true",
+        help="Hide assembly visualization of control flow.",
+    )
+    parser.add_argument(
         "--debug", action="store_true", default=False, help="Print debug messages."
     )
 
@@ -258,6 +263,7 @@ def main():
         print_transformed_ir=args.print_transformed_ir,
         print_lowered_ir=args.print_lowered_ir,
         print_assembly=args.print_assembly,
+        visualize_jumps=not args.hide_jumps,
         color=args.color,
         debug=args.debug,
         dump_file=dump_file,
