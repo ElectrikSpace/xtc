@@ -12,8 +12,6 @@ import shutil
 from pathlib import Path
 
 
-from xtc.utils.xdsl_aux import brand_inputs_with_noalias
-
 from xtc.utils.tools import (
     get_mlir_prefix,
 )
@@ -101,11 +99,8 @@ class MlirCompiler(itf.comp.Compiler):
         return executable
 
     def generate_program(self) -> RawMlirProgram:
-        # xdsl_func input must be read only, clone it first
-        xdsl_func = self._backend.xdsl_func.clone()
-        if self._backend.no_alias:
-            brand_inputs_with_noalias(xdsl_func)
-        return MlirProgram(xdsl_func)
+        # xdsl_func input must be read only
+        return MlirProgram(self._backend.xdsl_func, self._backend.no_alias)
 
 
 class MlirProgramCompiler:

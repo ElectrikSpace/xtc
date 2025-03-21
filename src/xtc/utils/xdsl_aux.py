@@ -36,14 +36,6 @@ def parse_xdsl_module(source: str) -> ModuleOp:
     return module
 
 
-def brand_inputs_with_noalias(myfunc: func.FuncOp):
-    alias_attrs = [
-        DictionaryAttr(value={"llvm.noalias": UnitAttr()})
-        for ity in myfunc.function_type.inputs
-    ]
-    myfunc.arg_attrs = alias_attrs
-
-
 def xdsl_operator_to_function(source_op: Operation, name: str) -> func.FuncOp:
     # Fetch data
     operands = source_op.operands
