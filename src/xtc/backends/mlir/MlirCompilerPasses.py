@@ -179,12 +179,18 @@ class MlirProgramInsertTransformPass:
             #
             op_to_tile = tiling_command.results[0]
 
-        # Stamp the outermost loop
-        outer_loop = all_loops[0]
-        for s in schedule.loop_stamps:
-            transform.AnnotateOp(outer_loop, s)
+        # The resulting operation is either the outermost loop or
+        # the initial (not tiled) handle
+        if all_loops:
+            handle_after_tiling = all_loops[0]
+        else:
+            handle_after_tiling = handle
 
-        return outer_loop
+        # Stamp the resulting operation
+        for s in schedule.loop_stamps:
+            transform.AnnotateOp(handle_after_tiling, s)
+
+        return handle_after_tiling
 
     def _generate_node_unroll(
         self, handle: OpResult, schedule: MlirNodeSchedule

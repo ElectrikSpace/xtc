@@ -52,25 +52,25 @@ def matmul_graph(i, j, k, dtype, name):
     return payload, [fill, matmul]
 
 def matmul_impl(i, j, k, dtype, name):
-    from xtc.backends.mlir.MlirNodeImplementer import MlirNodeImplementer
-    from xtc.backends.mlir.MlirGraphImplementer import MlirGraphImplementer
+    from xtc.backends.mlir.MlirNodeBackend import MlirNodeBackend
+    from xtc.backends.mlir.MlirGraphBackend import MlirGraphBackend
 
     xdsl_func, (xdsl_fill_op, xdsl_matmul_op) = matmul_graph(i, j, k, dtype, name)
-    fill = MlirNodeImplementer(
+    fill = MlirNodeBackend(
         payload_name="fill",
         source_op=xdsl_fill_op,
         dims=["i", "j"],
         no_alias=True,
         id=f"__xtc_id_fill__",
     )
-    matmul = MlirNodeImplementer(
+    matmul = MlirNodeBackend(
         payload_name="matmul",
         source_op=xdsl_matmul_op,
         dims=["i", "j", "k"],
         no_alias=True,
         id=f"__xtc_id_matmul__",
     )
-    impl = MlirGraphImplementer(
+    impl = MlirGraphBackend(
         xdsl_func=xdsl_func,
         nodes=[fill, matmul],
     )
@@ -81,7 +81,7 @@ def matmul_node_impl(i, j, k, dtype, name):
     from xdsl.dialects.builtin import MemRefType, f32, f64, UnitAttr
     from xdsl.ir import Block
     from xdsl.builder import ImplicitBuilder
-    from xtc.backends.mlir.MlirNodeImplementer import MlirNodeImplementer
+    from xtc.backends.mlir.MlirNodeBackend import MlirNodeBackend
 
     elt_type = {"float32": f32, "float64": f64}[dtype]
     ops_types = [MemRefType(elt_type, shape)
@@ -94,7 +94,7 @@ def matmul_node_impl(i, j, k, dtype, name):
             outputs=(block.args[2],),
         )
     xdsl_matmul_op.attributes["__xtc_id_matmul__"] = UnitAttr()
-    impl = MlirNodeImplementer(
+    impl = MlirNodeBackend(
         payload_name=name,
         source_op=xdsl_matmul_op,
         dims=["i", "j", "k"],
