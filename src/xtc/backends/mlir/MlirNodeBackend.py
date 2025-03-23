@@ -14,7 +14,7 @@ from xtc.utils.xdsl_aux import xdsl_operator_to_function
 from .MlirBackend import MlirBackend
 
 
-class MlirNodeImplementer(MlirBackend):
+class MlirNodeBackend(MlirBackend):
     count = 0
 
     def __init__(
@@ -29,8 +29,8 @@ class MlirNodeImplementer(MlirBackend):
         id: str | None = None,
     ):
         if id is None:
-            self.op_id_attribute = f"__id{MlirNodeImplementer.count}__"
-            MlirNodeImplementer.count += 1
+            self.op_id_attribute = f"__id{MlirNodeBackend.count}__"
+            MlirNodeBackend.count += 1
             source_op.attributes[self.op_id_attribute] = xdslUnitAttr()
         else:
             self.op_id_attribute = id

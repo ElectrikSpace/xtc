@@ -156,12 +156,12 @@ def mlir_matmul_impl(i, j, k, ftype, graph):
     from xdsl.ir import Block, Region
     from xdsl.dialects.builtin import FunctionType, MemRefType, f32, f64
     from xdsl.dialects import func
-    from xtc.backends.mlir.MlirGraphImplementer import MlirGraphImplementer
+    from xtc.backends.mlir.MlirGraphBackend import MlirGraphBackend
     from xtc.backends.mlir.MlirCompiler import MlirCompiler
-    from xtc.backends.mlir.MlirNodeImplementer import MlirNodeImplementer
+    from xtc.backends.mlir.MlirNodeBackend import MlirNodeBackend
 
     mlir_nodes = {
-        ident: MlirNodeImplementer(
+        ident: MlirNodeBackend(
             payload_name=ident,
             source_op=node["op"],
             dims=node["dims"],
@@ -171,7 +171,7 @@ def mlir_matmul_impl(i, j, k, ftype, graph):
         )
         for ident, node in graph["nodes"].items()
     }
-    impl = MlirGraphImplementer(
+    impl = MlirGraphBackend(
         xdsl_func=graph["payload"],
         nodes=list(mlir_nodes.values()),
         no_alias=True,

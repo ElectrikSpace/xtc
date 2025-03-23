@@ -12,8 +12,8 @@ from xdsl.ir import (
 )
 
 from xtc.utils.xdsl_aux import parse_xdsl_module
-from xtc.backends.mlir.MlirNodeImplementer import MlirNodeImplementer
-from xtc.backends.mlir.MlirGraphImplementer import MlirGraphImplementer
+from xtc.backends.mlir.MlirNodeBackend import MlirNodeBackend
+from xtc.backends.mlir.MlirGraphBackend import MlirGraphBackend
 
 
 def remove_attr(o: Operation, attr_name: str):
@@ -84,7 +84,7 @@ def schedule_operation(
     remove_attr(o, "loop.dims")
     loop_stamps = extract_string_list_from_attr(o, "loop.add_attributes")
 
-    impl = MlirNodeImplementer(
+    impl = MlirNodeBackend(
         source_op=o,
         dims=dims,
         always_vectorize=always_vectorize,
@@ -237,7 +237,7 @@ def main():
         )
         nodes_scheds.append(sched)
 
-    impl_graph = MlirGraphImplementer(
+    impl_graph = MlirGraphBackend(
         always_vectorize=args.always_vectorize,
         xdsl_func=myfunc,
         nodes=[sched.backend for sched in nodes_scheds],
