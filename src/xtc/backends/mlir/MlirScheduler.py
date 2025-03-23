@@ -33,7 +33,7 @@ class MlirScheduler(itf.schd.Scheduler):
                 ]
             else:
                 self._nodes_schedulers = nodes_schedulers
-            # TODO: by default, when a graph, we assume to chedule the
+            # TODO: by default, when a graph, we assume to schedule the
             # output node which is assumed to be the last
             self._scheduler: MlirNodeScheduler | None = (
                 self._nodes_schedulers[-1]._scheduler
