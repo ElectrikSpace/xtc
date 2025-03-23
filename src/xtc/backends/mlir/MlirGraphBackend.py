@@ -9,20 +9,20 @@ from xdsl.dialects import func as xdslfunc
 from xdsl.dialects.builtin import AnyMemRefType
 from xdsl.ir import Block as xdslBlock
 
-from .MlirNodeImplementer import MlirNodeImplementer
+from .MlirNodeBackend import MlirNodeBackend
 from .MlirBackend import MlirBackend
 
 
-class MlirGraphImplementer(MlirBackend):
+class MlirGraphBackend(MlirBackend):
     def __init__(
         self,
         xdsl_func: xdslfunc.FuncOp,
-        nodes: list[MlirNodeImplementer],
+        nodes: list[MlirNodeBackend],
         concluding_passes: list[str] = [],
         always_vectorize: bool = True,
         no_alias: bool = False,
     ):
-        self.nodes: dict[str, MlirNodeImplementer] = {}
+        self.nodes: dict[str, MlirNodeBackend] = {}
         for impl in nodes:
             first_block = cast(xdslBlock, xdsl_func.body.first_block)
             assert impl.source_op in first_block.ops
