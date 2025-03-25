@@ -98,18 +98,20 @@ def schedule_operation(
     sched = impl.get_scheduler()
 
     # Parse and process the tiling declarations
-    tiles_sizes = extract_string_int_dict_from_attr(o, "loop.tiles_sizes")
-    remove_attr(o, "loop.tiles_sizes")
-    if "loop.tiles_names" in o.attributes:
-        assert isinstance(o.attributes["loop.tiles_names"], builtin.DictionaryAttr)
-        for dim, ts in o.attributes["loop.tiles_names"].data.items():
+    if "loop.tiles" in o.attributes:
+        assert isinstance(o.attributes["loop.tiles"], builtin.DictionaryAttr)
+        toplevel_dict = o.attributes["loop.tiles"]
+        for dim_name, tiles_dict in toplevel_dict.data.items():
+            assert isinstance(tiles_dict, builtin.DictionaryAttr)
             tiles_on_dim = {}
-            assert isinstance(ts, builtin.ArrayAttr)
-            for t in ts:
-                size = tiles_sizes[t.data]
-                tiles_on_dim[t.data] = size
-            sched.tile(dim, tiles_on_dim)
-    remove_attr(o, "loop.tiles_names")
+            for tile_name, tile_size in tiles_dict.data.items():
+                assert isinstance(tile_name, str) and isinstance(
+                    tile_size, builtin.IntegerAttr
+                )
+                tiles_on_dim[tile_name] = tile_size.value.data
+            sched.tile(dim_name, tiles_on_dim)
+        remove_attr(o, "loop.tiles")
+
     # Parse the scheduling attributes
     interchange = extract_string_list_from_attr(o, "loop.interchange")
     vectorize = extract_string_list_from_attr(o, "loop.vectorize")

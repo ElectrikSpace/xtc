@@ -49,7 +49,7 @@ Roadmap:
 
 Ensure installation of minimal required dependencies on the distribution:
 
-    sudo apt install python3 build-essential libomp5 binutils binutils-aarch64-linux-gnu
+    sudo apt install python3 python3-dev build-essential libomp5 binutils binutils-aarch64-linux-gnu binutils-x86-64-linux-gnu
 
 Setup a virtual python environment with python >= 3.10,
 and install base requirements, for instance:

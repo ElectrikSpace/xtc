@@ -9,8 +9,7 @@ func.func @myfun(
   linalg.fill
       {
         loop.dims = ["i","j"],
-        loop.tiles_names = {"i" = ["i1"], "j" = ["j1"]},
-        loop.tiles_sizes = {i1 = 1, j1 = 64},
+        loop.tiles = {"i" = {"i1" = 1}, "j" = {"j1" = 64}},
         loop.interchange = ["i","j","i1","j1"],
         loop.vectorize = ["j1"]
     }
@@ -19,8 +18,7 @@ func.func @myfun(
   linalg.matmul
     {
       loop.dims = ["i","j","k"],
-      loop.tiles_names = {"i" = ["i1"], "j" = ["j1"], "k" = ["k1"]},
-      loop.tiles_sizes = {i1 = 1, j1 = 64, k1 = 8},
+      loop.tiles = {"i" = {"i1" = 1}, "j" = {"j1" = 64}, "k" = {"k1" = 8}},
       loop.interchange = ["i","j","k","i1","k1","j1"],
       loop.vectorize = ["j1"]
     }

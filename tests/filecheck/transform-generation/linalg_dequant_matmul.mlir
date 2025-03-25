@@ -11,9 +11,8 @@ func.func @myfun(
   linalg.fill
       {
         loop.dims = ["i","j"],
-        loop.tiles_names = {"i" = ["i1"], "j" = ["j1"]},
-        loop.tiles_sizes = {i1 = 1, j1 = 64},
-        loop.interchange = ["i","j","j1"],
+        loop.tiles = {"i" = {"i1" = 1}, "j" = {"j1" = 64}},
+        loop.interchange = ["i","j","i1","j1"],
         loop.vectorize = ["j1"]
     }
     ins(%cst : f32)
@@ -30,8 +29,7 @@ func.func @myfun(
   } ins(%Bquant : memref<512x256xi8>) outs(%B : memref<512x256xf32>)
   attrs = {
       loop.dims = ["j","k"],
-      loop.tiles_names = {"j" = ["j1"], "k" = ["k1"]},
-      loop.tiles_sizes = {j1 = 64, k1 = 8},
+      loop.tiles = {"j" = {"j1" = 64}, "k" = {"k1" = 8}},
       loop.interchange = ["k","j","k1","j1"],
       loop.vectorize = ["j1"]
   }
@@ -50,8 +48,7 @@ func.func @myfun(
   linalg.matmul
     {
       loop.dims = ["i","j","k"],
-      loop.tiles_names = {"i" = ["i1"], "j" = ["j1"], "k" = ["k1"]},
-      loop.tiles_sizes = {i1 = 1, j1 = 64, k1 = 8},
+      loop.tiles = {"i" = {"i1" = 1}, "j" = {"j1" = 64}, "k" = {"k1" = 8}},
       loop.interchange = ["i","j","k","i1","k1","j1"],
       loop.vectorize = ["j1"]
     }
@@ -88,25 +85,27 @@ func.func @myfun(
 // CHECK-NEXT:      transform.annotate %loops "__id0__i" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_0, %loops_1 = transform.structured.tile_using_for %tiled_linalg_op tile_sizes [0, 64] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 // CHECK-NEXT:      transform.annotate %loops_1 "__id0__j" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_2, %loops_3 = transform.structured.tile_using_for %tiled_linalg_op_0 tile_sizes [1, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_3 "__id0__i1" : !transform.any_op
 // CHECK-NEXT:      %1 = transform.structured.match attributes {__id1__} in %arg0 : (!transform.any_op) -> !transform.any_op
-// CHECK-NEXT:      %tiled_linalg_op_2, %loops_3 = transform.structured.tile_using_for %1 tile_sizes [0, 8] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_3 "__id1__k" : !transform.any_op
-// CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %tiled_linalg_op_2 tile_sizes [64, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_5 "__id1__j" : !transform.any_op
-// CHECK-NEXT:      %tiled_linalg_op_6, %loops_7 = transform.structured.tile_using_for %tiled_linalg_op_4 tile_sizes [0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_7 "__id1__k1" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %1 tile_sizes [0, 8] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_5 "__id1__k" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_6, %loops_7 = transform.structured.tile_using_for %tiled_linalg_op_4 tile_sizes [64, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_7 "__id1__j" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_8, %loops_9 = transform.structured.tile_using_for %tiled_linalg_op_6 tile_sizes [0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_9 "__id1__k1" : !transform.any_op
 // CHECK-NEXT:      %2 = transform.structured.match attributes {__id2__} in %arg0 : (!transform.any_op) -> !transform.any_op
-// CHECK-NEXT:      %tiled_linalg_op_8, %loops_9 = transform.structured.tile_using_for %2 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_9 "__id2__i" : !transform.any_op
-// CHECK-NEXT:      %tiled_linalg_op_10, %loops_11 = transform.structured.tile_using_for %tiled_linalg_op_8 tile_sizes [0, 64, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_11 "__id2__j" : !transform.any_op
-// CHECK-NEXT:      %tiled_linalg_op_12, %loops_13 = transform.structured.tile_using_for %tiled_linalg_op_10 tile_sizes [0, 0, 8] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_13 "__id2__k" : !transform.any_op
-// CHECK-NEXT:      %tiled_linalg_op_14, %loops_15 = transform.structured.tile_using_for %tiled_linalg_op_12 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_15 "__id2__i1" : !transform.any_op
-// CHECK-NEXT:      %tiled_linalg_op_16, %loops_17 = transform.structured.tile_using_for %tiled_linalg_op_14 tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_17 "__id2__k1" : !transform.any_op
-// CHECK-NEXT:      %3 = transform.get_parent_op %loops_9 {isolated_from_above} : (!transform.any_op) -> !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_10, %loops_11 = transform.structured.tile_using_for %2 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_11 "__id2__i" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_12, %loops_13 = transform.structured.tile_using_for %tiled_linalg_op_10 tile_sizes [0, 64, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_13 "__id2__j" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_14, %loops_15 = transform.structured.tile_using_for %tiled_linalg_op_12 tile_sizes [0, 0, 8] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_15 "__id2__k" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_16, %loops_17 = transform.structured.tile_using_for %tiled_linalg_op_14 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_17 "__id2__i1" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_18, %loops_19 = transform.structured.tile_using_for %tiled_linalg_op_16 tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_19 "__id2__k1" : !transform.any_op
+// CHECK-NEXT:      %3 = transform.get_parent_op %loops_11 {isolated_from_above} : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      %4 = transform.structured.vectorize_children_and_apply_patterns %3 : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      transform.apply_patterns to %4 {
 // CHECK-NEXT:        transform.apply_patterns.vector.lower_outerproduct

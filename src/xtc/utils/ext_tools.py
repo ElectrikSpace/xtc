@@ -80,7 +80,7 @@ mlirrunner_opts = [
     "--O3",
 ]
 
-objdump_bin = "objdump"
+objdump_bin = "x86_64-linux-gnu-objdump"
 
 objdump_arm_bin = "aarch64-linux-gnu-objdump"
 

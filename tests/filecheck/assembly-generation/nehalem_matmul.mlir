@@ -12,8 +12,7 @@ func.func @myfun(
   linalg.matmul
     {
       loop.dims = ["i","j","k"],
-      loop.tiles_names = {"i" = ["i1"], "j" = ["j1"], "k" = ["k1"]},
-      loop.tiles_sizes = {i1 = 1, j1 = 16, k1 = 4},
+      loop.tiles = {"i" = {"i1" = 1}, "j" = {"j1" = 16}, "k" = {"k1" = 4}},
       loop.interchange = ["i","j","k","i1","k1","j1"],
       loop.vectorize = ["j1"]
     }

@@ -9,8 +9,7 @@ func.func @myfun(
   linalg.fill
     {
       loop.dims = ["n","h","w","f"],
-      loop.tiles_names = {"f" = ["f1"]},
-      loop.tiles_sizes = {f1 = 8},
+      loop.tiles = {"f" = {"f1" = 8}},
       loop.interchange = ["n","h","w","f","f1"],
       loop.vectorize = ["f1"],
       loop.parallelize = ["h"]
@@ -25,8 +24,12 @@ func.func @myfun(
       iterator_types = ["parallel", "parallel", "parallel", "parallel",
           "reduction", "reduction", "reduction"],
       loop.dims = ["n","h","w","f","c","r","s"],
-      loop.tiles_names = {"f" = ["f1"], "h" = ["h1", "h2"], "w" = ["w1"], "c" = ["c1"]},
-      loop.tiles_sizes = {f1 = 64, h2 = 2, w1 = 2, c1 = 4, h1 = 14},
+      loop.tiles = {
+        "f" = {"f1" = 64},
+        "h" = {"h1" = 14, "h2" = 2},
+        "w" = {"w1" = 2},
+        "c" = {"c1" = 4}
+      },
       loop.interchange = ["r", "s", "h", "w", "h1", "f", "c", "c1", "w1", "h2", "f1"],
       loop.vectorize = ["f1"],
       loop.unroll = {f1 = 4, h2 = 2, w1 = 2, c1 = 4}
