@@ -4,11 +4,14 @@
 #
 from abc import ABC, abstractmethod
 from typing import Any, TypeAlias
+from typing_extensions import override
 import numpy.typing
 
 
 ShapeType: TypeAlias = tuple[int | str | None, ...] | None
 DataType: TypeAlias = str | None
+ConstantShapeType: TypeAlias = tuple[int, ...]
+ConstantDataType: TypeAlias = str
 
 
 class TensorType(ABC):
@@ -47,6 +50,30 @@ class TensorType(ABC):
 
         Returns:
             The tensor's dimensionality
+        """
+        ...
+
+
+class ConstantTensorType(TensorType):
+    @property
+    @abstractmethod
+    @override
+    def shape(self) -> ConstantShapeType:
+        """Returns the tensor's constant shape as a tuple of dimension sizes.
+
+        Returns:
+            The size of each dimension in the tensor
+        """
+        ...
+
+    @property
+    @abstractmethod
+    @override
+    def dtype(self) -> ConstantDataType:
+        """Returns the tensor's constant data type.
+
+        Returns:
+            The underlying data type of the tensor elements
         """
         ...
 

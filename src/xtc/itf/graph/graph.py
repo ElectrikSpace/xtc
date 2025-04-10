@@ -3,6 +3,7 @@
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
 from abc import ABC, abstractmethod
+from collections.abc import Sequence, Mapping
 from .node import Node
 from ..data import TensorType, Tensor
 
@@ -17,23 +18,23 @@ class Graph(ABC):
     A Graph can be evaluated by interpretation or compiled through various backends
     (mlir, tvm, jir) using corresponding Backend, Scheduler, and Compiler classes.
 
-    Nodes in the graph are keyed by their name which is unique within the graph.
+    Nodes in the graph are keyed by their uid which is globally unique.
     """
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Returns the unique name of this graph.
+        """Returns the name of this graph. May be non-unique or empty.
 
         Returns:
-            The graph's globally unique identifier
+            The graph's name
         """
         ...
 
     @property
     @abstractmethod
-    def nodes(self) -> dict[str, Node]:
-        """Returns a dictionary of all nodes in the graph, keyed by node name.
+    def nodes(self) -> Mapping[str, Node]:
+        """Returns a dictionary of all nodes in the graph, keyed by node uid.
 
         Returns:
             Dictionary mapping node names to Node objects
@@ -42,26 +43,26 @@ class Graph(ABC):
 
     @property
     @abstractmethod
-    def inputs(self) -> list[str]:
-        """Returns the list of input tensor names for this graph.
+    def inputs(self) -> Sequence[str]:
+        """Returns the list of input tensor uids for this graph.
 
         Returns:
-            List of input tensor names
+            List of input tensor uids
         """
         ...
 
     @property
     @abstractmethod
-    def outputs(self) -> list[str]:
-        """Returns the list of output tensor names for the graph.
+    def outputs(self) -> Sequence[str]:
+        """Returns the list of output tensor uids for the graph.
 
         Returns:
-            List of output tensor names
+            List of output tensor uids
         """
         ...
 
     @abstractmethod
-    def forward_types(self, inputs_types: list[TensorType]) -> list[TensorType]:
+    def forward_types(self, inputs_types: Sequence[TensorType]) -> Sequence[TensorType]:
         """Infers output tensor types from input tensor types.
 
         Args:
@@ -73,7 +74,7 @@ class Graph(ABC):
         ...
 
     @abstractmethod
-    def forward(self, inputs: list[Tensor]) -> list[Tensor]:
+    def forward(self, inputs: Sequence[Tensor]) -> Sequence[Tensor]:
         """Evaluate the graph with input tensors to produce output tensors.
 
         Args:
