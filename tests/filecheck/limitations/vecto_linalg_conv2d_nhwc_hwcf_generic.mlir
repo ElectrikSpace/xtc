@@ -25,8 +25,7 @@ func.func @myfun(
   outs(%O : memref<1x28x28x128xf32>)
   attrs = {
     loop.dims = ["n","h","w","f","r","s","c"],
-    loop.interchange = ["n","h","w","f","r","s","c"],
-    loop.vectorize = ["f"]
+    loop.vectorize = ["h"]
   }
   {
     ^bb0(%0: f32, %1: f32, %2: f32) :
