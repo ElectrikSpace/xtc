@@ -124,6 +124,7 @@ def parse_schedule(scheduler: Scheduler, schedule: builtin.DictionaryAttr):
     tiles: dict[str, dict[str, int]] = {d: {} for d in scheduler.backend.dims}
     unroll: dict[str, int] = {}
     vecto: list[str] = []
+    parallel: list[str] = []
     for declaration, val in schedule.data.items():
         # Tiles
         if "#" in declaration:
@@ -157,6 +158,8 @@ def parse_schedule(scheduler: Scheduler, schedule: builtin.DictionaryAttr):
                         unroll[loop_name] = unroll_factor
                     case "Vectorize":
                         vecto.append(loop_name)
+                    case "Parallel":
+                        parallel.append(loop_name)
                     case _:
                         assert False
         elif isinstance(val, builtin.UnitAttr):
@@ -168,6 +171,7 @@ def parse_schedule(scheduler: Scheduler, schedule: builtin.DictionaryAttr):
         scheduler.tile(dim, tiles[dim])
     scheduler.interchange(interchange)
     scheduler.vectorize(vecto)
+    scheduler.parallelize(parallel)
     scheduler.unroll(unroll)
     return scheduler
 
