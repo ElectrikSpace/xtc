@@ -27,7 +27,7 @@ func.func @myfun(
     loop.dims = ["n","h","w","f","r","s","c"],
     loop.schedule = {
       "n",
-        "h"={"Vectorize"},
+        "h"={"vectorize"},
           "w",
             "f",
               "r",

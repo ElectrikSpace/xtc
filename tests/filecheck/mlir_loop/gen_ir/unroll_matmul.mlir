@@ -11,7 +11,7 @@ func.func @myfun(
       loop.schedule = {
         "I",
           "J",
-            "K" = {"Unroll" = 4}
+            "K" = {"unroll" = 4}
       }
     }
     ins(%A, %B : memref<256x512xf32>, memref<512x256xf32>)

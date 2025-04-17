@@ -11,7 +11,7 @@ func.func @myfun(
       loop.schedule = {
         "I",
           "K",
-            "J" = {"Vectorize"}
+            "J" = {"vectorize"}
       }
     }
     ins(%A, %B : memref<256x512xf32>, memref<512x256xf32>)

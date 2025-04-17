@@ -12,8 +12,8 @@ func.func @myfun(
         "I",
           "J",
             "K",
-              "I#1" = {"Unroll"},
-                "K#8"= {"Unroll" = 2},
+              "I#1" = {"unroll"},
+                "K#8"= {"unroll" = 2},
                   "J#64"
       }
     }

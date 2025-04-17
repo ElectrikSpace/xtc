@@ -146,7 +146,7 @@ def parse_schedule(scheduler: Scheduler, schedule: builtin.DictionaryAttr):
         if isinstance(val, builtin.DictionaryAttr):
             for annotation, param in val.data.items():
                 match annotation:
-                    case "Unroll":
+                    case "unroll":
                         if isinstance(param, builtin.UnitAttr):
                             loop_size = sizes[loop_name]
                             assert loop_size
@@ -156,9 +156,9 @@ def parse_schedule(scheduler: Scheduler, schedule: builtin.DictionaryAttr):
                         else:
                             raise Exception(f"Unknown unroll factor for {loop_name}")
                         unroll[loop_name] = unroll_factor
-                    case "Vectorize":
+                    case "vectorize":
                         vecto.append(loop_name)
-                    case "Parallel":
+                    case "parallelize":
                         parallel.append(loop_name)
                     case _:
                         raise Exception(

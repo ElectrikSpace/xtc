@@ -10,7 +10,7 @@ func.func @myfun(
       loop.dims = ["I","J","K"],
       loop.schedule = {
         "I",
-          "K" = {"Unroll" = 2},
+          "K" = {"unroll" = 2},
             "J"
       }
     }

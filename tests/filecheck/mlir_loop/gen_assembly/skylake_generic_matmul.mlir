@@ -21,9 +21,9 @@ func.func @myfun(
           "I",
             "J",
               "K",
-                "I#1" = {"Unroll"},
-                  "K#8"= {"Unroll"},
-                    "J#64" = {"Vectorize"}
+                "I#1" = {"unroll"},
+                  "K#8"= {"unroll"},
+                    "J#64" = {"vectorize"}
         }
       }
     {

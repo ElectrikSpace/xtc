@@ -9,7 +9,7 @@ func.func @myfun(
     {
       loop.dims = ["I","J","K"],
       loop.schedule = {
-        "I" = {"Parallel"},
+        "I" = {"parallelize"},
           "K",
             "J"
       }

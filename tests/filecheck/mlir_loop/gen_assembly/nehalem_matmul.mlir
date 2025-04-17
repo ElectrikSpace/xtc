@@ -12,9 +12,9 @@ func.func @myfun(
         "I",
           "J",
             "K",
-              "I#1" = {"Unroll"},
-                "K#4"= {"Unroll"},
-                  "J#16" = {"Vectorize"}
+              "I#1" = {"unroll"},
+                "K#4"= {"unroll"},
+                  "J#16" = {"vectorize"}
       }
     }
     ins(%A, %B : memref<256x512xf32>, memref<512x256xf32>)
