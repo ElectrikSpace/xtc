@@ -7,84 +7,242 @@
 import argparse
 from pathlib import Path
 from xdsl.dialects import func, builtin
-from xdsl.ir import (
-    Operation,
-)
+from xdsl.ir import Attribute, Operation
 
+from xtc.itf.schd.scheduler import Scheduler
 from xtc.utils.xdsl_aux import parse_xdsl_module
 from xtc.backends.mlir.MlirNodeBackend import MlirNodeBackend
 from xtc.backends.mlir.MlirGraphBackend import MlirGraphBackend
 
 
-def remove_attr(o: Operation, attr_name: str):
-    if attr_name in o.attributes:
-        del o.attributes[attr_name]
+def main():
+    args = parse_args()
+
+    with open(args.filename, "r") as f:
+        source = f.read()
+
+    module = parse_xdsl_module(source)
+    myfunc = get_unique_function(module)
+    ops_to_schedule = get_annotated_operations(myfunc)
+
+    # Build the transform script
+    get_scheduler = parse_scheduler_legacy if args.old_syntax else parse_scheduler
+    assert get_scheduler
+    schedulers = []
+    for idx, op in enumerate(ops_to_schedule):
+        node_name = f"v{idx}"
+        sched = get_scheduler(
+            op,
+            node_name,
+            always_vectorize=args.always_vectorize,
+            concluding_passes=args.concluding_passes,
+            no_alias=args.no_alias,
+        )
+        schedulers.append(sched)
+
+    graph_backend = MlirGraphBackend(
+        always_vectorize=args.always_vectorize,
+        xdsl_func=myfunc,
+        nodes=[sched.backend for sched in schedulers],
+        concluding_passes=args.concluding_passes,
+        no_alias=args.no_alias,
+    )
+    graph_scheduler = graph_backend.get_scheduler(nodes_schedulers=schedulers)
+    final_schedule = graph_scheduler.schedule()
+
+    dump_file = Path(args.filename).stem
+    print_source = args.print_source_ir or not any(
+        [
+            args.evaluate,
+            args.print_transformed_ir,
+            args.print_lowered_ir,
+            args.print_assembly,
+        ]
+    )
+
+    compiler_args = {
+        "mlir_install_dir": args.llvm_dir,
+        "to_disassemble": graph_backend.payload_name,
+        "print_source_ir": print_source,
+        "print_transformed_ir": args.print_transformed_ir,
+        "print_lowered_ir": args.print_lowered_ir,
+        "print_assembly": args.print_assembly,
+        "visualize_jumps": not args.hide_jumps,
+        "color": args.color,
+        "debug": args.debug,
+        "dump_file": dump_file,
+        "arch": args.arch,
+        "cpu": args.cpu,
+        "vectors_size": args.vectors_size,
+    }
+
+    if args.evaluate:
+        compiler_args["shared_lib"] = True
+
+    compiler = graph_backend.get_compiler(**compiler_args)
+    module = compiler.compile(final_schedule)
+
+    if args.evaluate:
+        evaluator = module.get_evaluator(init_zero=args.init_zero, min_repeat_ms=100)
+        res, code, err = evaluator.evaluate()
+        if code != 0:
+            raise RuntimeError(f"Evaluation failed: {err}")
+        print(min(res))
 
 
-def select_xdsl_payload(module: builtin.ModuleOp) -> func.FuncOp:
-    myfunc = None
-    for o in module.walk():
-        if isinstance(o, func.FuncOp):
-            myfunc = o
-            break
-    assert myfunc
-    return myfunc
-
-
-def operations_to_schedule(myfunc: func.FuncOp) -> list[Operation]:
-    annotated_operations = []
-    for o in myfunc.walk():
-        for attr_name in o.attributes:
-            if "loop." in attr_name:
-                annotated_operations.append(o)
-                break
-    return annotated_operations
-
-
-def extract_string_list_from_attr(o: Operation, attr_name: str) -> list[str]:
-    extracted_list = []
-    if attr_name in o.attributes:
-        raw_list = o.attributes[attr_name]
-        assert isinstance(raw_list, builtin.ArrayAttr)
-        for d in raw_list.data:
-            assert isinstance(d, builtin.StringAttr)
-            extracted_list.append(d.data)
-    return extracted_list
-
-
-def extract_string_int_dict_from_attr(o: Operation, attr_name: str) -> dict[str, int]:
-    extracted_dict = {}
-    if attr_name in o.attributes:
-        raw_dict = o.attributes[attr_name]
-        assert isinstance(raw_dict, builtin.DictionaryAttr)
-        for string, integer in raw_dict.data.items():
-            assert isinstance(string, str) and isinstance(integer, builtin.IntegerAttr)
-            extracted_dict[string] = integer.value.data
-    return extracted_dict
-
-
-def schedule_operation(
-    o: Operation,
+def parse_scheduler(
+    op: Operation,
     node_name: str,
     always_vectorize: bool,
     concluding_passes: list[str],
     no_alias: bool,
 ):
-    parsed_id = None
-    for attr_name in o.attributes:
-        if attr_name.startswith("__"):
-            assert parsed_id is None
-            parsed_id = attr_name
+    backend = parse_mlir_node_backend(
+        op=op,
+        node_name=node_name,
+        always_vectorize=always_vectorize,
+        concluding_passes=concluding_passes,
+        no_alias=no_alias,
+    )
 
-    # Parse the initial specification
-    assert "loop.dims" in o.attributes
-    dims = extract_string_list_from_attr(o, "loop.dims")
-    assert dims
-    remove_attr(o, "loop.dims")
-    loop_stamps = extract_string_list_from_attr(o, "loop.add_attributes")
+    scheduler = backend.get_scheduler()
 
-    impl = MlirNodeBackend(
-        source_op=o,
+    if "loop.schedule" in op.attributes:
+        schedule_attribute = op.attributes.get("loop.schedule")
+        assert isinstance(schedule_attribute, builtin.DictionaryAttr)
+        parse_schedule(scheduler, schedule_attribute)
+        remove_attribute(op, "loop.schedule")
+
+    return scheduler
+
+
+def parse_schedule(scheduler: Scheduler, schedule: builtin.DictionaryAttr):
+    assert isinstance(scheduler.backend, MlirNodeBackend)
+
+    sizes: dict[str, int | None] = {}
+    interchange: list[str] = []
+    tiles: dict[str, dict[str, int]] = {d: {} for d in scheduler.backend.dims}
+    unroll: dict[str, int] = {}
+    vecto: list[str] = []
+    parallel: list[str] = []
+    for declaration, val in schedule.data.items():
+        # Tiles
+        if "#" in declaration:
+            dim_name, tile_size = declaration.split("#")
+            loop_size = int(tile_size)
+            tile_num = len(tiles[dim_name])
+            loop_name = f"{dim_name}{tile_num}"
+            tiles[dim_name][loop_name] = loop_size
+        # Initial dimensions
+        elif declaration in scheduler.backend.dims:
+            loop_name = declaration
+            loop_size = None
+        else:
+            raise Exception(f"Unknown declaration: {declaration}")
+        sizes[loop_name] = loop_size
+        # Build the interchange
+        interchange.append(loop_name)
+        # Annotations
+        if isinstance(val, builtin.DictionaryAttr):
+            for annotation, param in val.data.items():
+                match annotation:
+                    case "unroll":
+                        if isinstance(param, builtin.UnitAttr):
+                            loop_size = sizes[loop_name]
+                            assert loop_size
+                            unroll_factor = loop_size
+                        elif isinstance(param, builtin.IntegerAttr):
+                            unroll_factor = param.value.data
+                        else:
+                            raise Exception(f"Unknown unroll factor for {loop_name}")
+                        unroll[loop_name] = unroll_factor
+                    case "vectorize":
+                        vecto.append(loop_name)
+                    case "parallelize":
+                        parallel.append(loop_name)
+                    case _:
+                        raise Exception(
+                            f"Unknown annotation on {loop_name}: {annotation}"
+                        )
+        elif isinstance(val, builtin.UnitAttr):
+            pass
+        else:
+            raise Exception(f"The annotation on {loop_name} must be a dict")
+
+    for dim in tiles:
+        scheduler.tile(dim, tiles[dim])
+    scheduler.interchange(interchange)
+    scheduler.vectorize(vecto)
+    scheduler.parallelize(parallel)
+    scheduler.unroll(unroll)
+    return scheduler
+
+
+def parse_scheduler_legacy(
+    op: Operation,
+    node_name: str,
+    always_vectorize: bool,
+    concluding_passes: list[str],
+    no_alias: bool,
+):
+    backend = parse_mlir_node_backend(
+        op=op,
+        node_name=node_name,
+        always_vectorize=always_vectorize,
+        concluding_passes=concluding_passes,
+        no_alias=no_alias,
+    )
+
+    sched = backend.get_scheduler()
+
+    # Tiling
+    tile_attr = op.attributes.get("loop.tiles")
+    if tile_attr:
+        assert isinstance(tile_attr, builtin.DictionaryAttr)
+        for dim, tile_dict in tile_attr.data.items():
+            assert isinstance(tile_dict, builtin.DictionaryAttr)
+            sched.tile(
+                dim,
+                {
+                    k: v.value.data
+                    for k, v in tile_dict.data.items()
+                    if isinstance(k, str) and isinstance(v, builtin.IntegerAttr)
+                },
+            )
+        remove_attribute(op, "loop.tiles")
+
+    # Feed the scheduler
+    if "loop.interchange" in op.attributes:
+        sched.interchange(get_string_list_attribute(op, "loop.interchange"))
+    sched.vectorize(get_string_list_attribute(op, "loop.vectorize"))
+    sched.parallelize(get_string_list_attribute(op, "loop.parallelize"))
+    sched.unroll(get_string_int_dict_attribute(op, "loop.unroll"))
+
+    for a in ["interchange", "vectorize", "parallelize", "unroll"]:
+        remove_attribute(op, f"loop.{a}")
+
+    return sched
+
+
+def parse_mlir_node_backend(
+    op: Operation,
+    node_name: str,
+    always_vectorize: bool,
+    concluding_passes: list[str],
+    no_alias: bool,
+) -> MlirNodeBackend:
+    # ID
+    parsed_id = next((k for k in op.attributes if k.startswith("__")), None)
+    # Dims
+    dims = get_string_list_attribute(op, "loop.dims")
+    if not dims:
+        raise ValueError("Missing loop.dims attribute")
+    remove_attribute(op, "loop.dims")
+    # Additional attributes
+    loop_stamps = get_string_list_attribute(op, "loop.add_attributes")
+
+    return MlirNodeBackend(
+        source_op=op,
         dims=dims,
         always_vectorize=always_vectorize,
         payload_name=node_name,
@@ -94,44 +252,48 @@ def schedule_operation(
         id=parsed_id,
     )
 
-    sched = impl.get_scheduler()
 
-    # Parse and process the tiling declarations
-    if "loop.tiles" in o.attributes:
-        assert isinstance(o.attributes["loop.tiles"], builtin.DictionaryAttr)
-        toplevel_dict = o.attributes["loop.tiles"]
-        for dim_name, tiles_dict in toplevel_dict.data.items():
-            assert isinstance(tiles_dict, builtin.DictionaryAttr)
-            tiles_on_dim = {}
-            for tile_name, tile_size in tiles_dict.data.items():
-                assert isinstance(tile_name, str) and isinstance(
-                    tile_size, builtin.IntegerAttr
-                )
-                tiles_on_dim[tile_name] = tile_size.value.data
-            sched.tile(dim_name, tiles_on_dim)
-        remove_attr(o, "loop.tiles")
-
-    # Parse the scheduling attributes
-    interchange = extract_string_list_from_attr(o, "loop.interchange")
-    vectorize = extract_string_list_from_attr(o, "loop.vectorize")
-    parallelize = extract_string_list_from_attr(o, "loop.parallelize")
-    unroll = extract_string_int_dict_from_attr(o, "loop.unroll")
-    remove_attr(o, "loop.interchange")
-    remove_attr(o, "loop.vectorize")
-    remove_attr(o, "loop.parallelize")
-    remove_attr(o, "loop.unroll")
-
-    # Feed the scheduler
-    if interchange:
-        sched.interchange(interchange)
-    sched.vectorize(vectorize)
-    sched.parallelize(parallelize)
-    sched.unroll(unroll)
-
-    return sched
+def remove_attribute(operation: Operation, attr_name: str):
+    operation.attributes.pop(attr_name, None)
 
 
-def main():
+def get_unique_function(module: builtin.ModuleOp) -> func.FuncOp:
+    myfunc = None
+    for o in module.walk():
+        if isinstance(o, func.FuncOp):
+            assert myfunc is None
+            myfunc = o
+    assert myfunc
+    return myfunc
+
+
+def get_annotated_operations(myfunc: func.FuncOp) -> list[Operation]:
+    return [
+        op for op in myfunc.walk() if any("loop." in attr for attr in op.attributes)
+    ]
+
+
+def get_string_list_attribute(op: Operation, attr_name: str) -> list[str]:
+    attr = op.attributes.get(attr_name)
+    if not attr:
+        return []
+    assert isinstance(attr, builtin.ArrayAttr)
+    return [elem.data for elem in attr.data if isinstance(elem, builtin.StringAttr)]
+
+
+def get_string_int_dict_attribute(op: Operation, attr_name: str) -> dict[str, int]:
+    attr = op.attributes.get(attr_name)
+    if not attr:
+        return {}
+    assert isinstance(attr, builtin.DictionaryAttr)
+    return {
+        key: val.value.data
+        for key, val in attr.data.items()
+        if isinstance(key, str) and isinstance(val, builtin.IntegerAttr)
+    }
+
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Blabla.")
     parser.add_argument(
         "filename",
@@ -221,6 +383,11 @@ def main():
         help="Hide assembly visualization of control flow.",
     )
     parser.add_argument(
+        "--old-syntax",
+        action="store_true",
+        help="Parse the old version of the attributes dialect.",
+    )
+    parser.add_argument(
         "--debug", action="store_true", default=False, help="Print debug messages."
     )
 
@@ -228,72 +395,5 @@ def main():
 
     if not Path(args.filename).exists():
         parser.error(f"{args.filename} does not exist.")
-    with open(args.filename, "r") as f:
-        source = f.read()
-    module = parse_xdsl_module(source)
-    myfunc = select_xdsl_payload(module)
-    annotated_operations = operations_to_schedule(myfunc)
 
-    # Build the transform script
-    count = 0
-    nodes_scheds = []
-    for op in annotated_operations:
-        node_name = f"v{count}"
-        count += 1
-        sched = schedule_operation(
-            op,
-            node_name,
-            always_vectorize=args.always_vectorize,
-            concluding_passes=args.concluding_passes,
-            no_alias=args.no_alias,
-        )
-        nodes_scheds.append(sched)
-
-    impl_graph = MlirGraphBackend(
-        always_vectorize=args.always_vectorize,
-        xdsl_func=myfunc,
-        nodes=[sched.backend for sched in nodes_scheds],
-        concluding_passes=args.concluding_passes,
-        no_alias=args.no_alias,
-    )
-    impl_scheduler = impl_graph.get_scheduler(nodes_schedulers=nodes_scheds)
-    impl_schedule = impl_scheduler.schedule()
-
-    print_source = args.print_source_ir or (
-        not args.evaluate
-        and not (
-            args.print_transformed_ir or args.print_lowered_ir or args.print_assembly
-        )
-    )
-
-    dump_file = Path(args.filename).stem
-    compiler_args = dict(
-        mlir_install_dir=args.llvm_dir,
-        to_disassemble=impl_graph.payload_name,
-        print_source_ir=print_source,
-        print_transformed_ir=args.print_transformed_ir,
-        print_lowered_ir=args.print_lowered_ir,
-        print_assembly=args.print_assembly,
-        visualize_jumps=not args.hide_jumps,
-        color=args.color,
-        debug=args.debug,
-        dump_file=dump_file,
-        arch=args.arch,
-        cpu=args.cpu,
-        vectors_size=args.vectors_size,
-    )
-    if args.evaluate:
-        compiler_args.update(dict(shared_lib=True))
-
-    compiler = impl_graph.get_compiler(**compiler_args)
-    module = compiler.compile(impl_schedule)
-
-    if args.evaluate:
-        evaluator_args = dict(
-            init_zero=args.init_zero,
-            min_repeat_ms=100,
-        )
-        evaluator = module.get_evaluator(**evaluator_args)
-        res, code, err = evaluator.evaluate()
-        assert code == 0, f"evaluation error: {err}"
-        print(min(res))
+    return args

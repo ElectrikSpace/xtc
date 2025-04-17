@@ -24,7 +24,7 @@ def process_file(file_path: str, in_place: bool, regexp: bool):
     # Extract the command from the first line
     first_line = lines[0].strip()
     command = re.sub(re_prefix, "", first_line).strip()
-    command = command.split("|")[0].strip()
+    command = command.rsplit("|", 1)[0].strip()
     command = command.replace("%s", file_path)
 
     # Execute the command
