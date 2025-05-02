@@ -66,6 +66,7 @@ source = ["xtc"]
 
 [tool.coverage.report]
 skip_empty = true
-
-[tool.coverage.html]
-skip_empty = true
+exclude_also = [
+  "pass",
+  "\\.\\.\\.",
+]
