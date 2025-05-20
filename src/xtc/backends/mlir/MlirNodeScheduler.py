@@ -4,7 +4,6 @@
 #
 from typing_extensions import override
 from dataclasses import dataclass
-from typing import TypeAlias
 
 __all__ = [
     "MlirNodeScheduler",
@@ -18,6 +17,7 @@ class MlirNodeSchedule:
     node_ident: str
     dims: list[str]
     loop_stamps: list[str]
+    splits: dict[str, dict[str, int]]
     tiles: dict[str, dict[str, int]]
     permutation: list[str]
     vectorization: list[str]
@@ -37,6 +37,7 @@ class MlirNodeScheduler:
         self.node_ident = node_ident
         self.loop_stamps = loop_stamps  # Specification of transformations
         self.dims = dims[:]
+        self.splits = {}
         self.tiles = {k: {k: 1} for k in self.dims}
         self.permutation = self.get_default_interchange()
         self.vectorization: list[str] = []
@@ -50,6 +51,7 @@ class MlirNodeScheduler:
             dims=self.dims,
             loop_stamps=self.loop_stamps,
             tiles=self.tiles,
+            splits=self.splits,
             permutation=self.permutation,
             vectorization=self.vectorization,
             parallelization=self.parallelization,
@@ -72,6 +74,9 @@ class MlirNodeScheduler:
 
     def get_default_interchange(self) -> list[str]:
         return list(self.loops().keys())
+
+    def split(self, dim: str, segments: dict[str, int]) -> None:
+        self.splits[dim] = segments
 
     def tile(
         self,
