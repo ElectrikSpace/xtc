@@ -19,7 +19,7 @@ class MlirNodeSchedule:
     loop_stamps: list[str]
     splits: dict[str, dict[str, int]]
     tiles: dict[str, dict[str, int]]
-    permutation: list[str]
+    permutation: dict[str, list[str]]
     vectorization: list[str]
     parallelization: list[str]
     unrolling: dict[str, int]
@@ -37,14 +37,16 @@ class MlirNodeScheduler:
         self.node_ident = node_ident
         self.loop_stamps = loop_stamps  # Specification of transformations
         self.dims = dims[:]
-        self.splits = {}
+        self.splits: dict[str, dict[str, int]] = {}
         self.tiles = {k: {k: 1} for k in self.dims}
-        self.permutation = self.get_default_interchange()
+        self.permutation: dict[str, list[str]] = {}
         self.vectorization: list[str] = []
         self.parallelization: list[str] = []
         self.unrolling: dict[str, int] = {}
 
     def mlir_node_schedule(self) -> MlirNodeSchedule:
+        if not self.permutation:
+            self.permutation["."] = self.get_default_interchange()
         return MlirNodeSchedule(
             node_name=self.node_name,
             node_ident=self.node_ident,
@@ -77,6 +79,8 @@ class MlirNodeScheduler:
 
     def split(self, dim: str, segments: dict[str, int]) -> None:
         self.splits[dim] = segments
+        for s in segments:
+            self.tiles[s] = {}
 
     def tile(
         self,
@@ -92,10 +96,16 @@ class MlirNodeScheduler:
         sizes = tiles_sizes + [1]
         for d, s in zip(dims, sizes):
             self.tiles[dim][d] = s
-        self.permutation = self.get_default_interchange()
 
     def interchange(self, permutation: list[str]):
-        self.permutation = permutation
+        assert permutation
+        if self.node_name in self.permutation or self.node_name in permutation:
+            root = permutation[0]
+            interchange = permutation[1:]
+        else:
+            root = self.node_name
+            interchange = permutation
+        self.permutation[root] = interchange
 
     def vectorize(self, vectorization: list[str]):
         self.vectorization = vectorization
