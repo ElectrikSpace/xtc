@@ -38,10 +38,10 @@ func.func @myfun(
 // CHECK-NEXT:            %subview_11 = memref.subview %subview_5[0, %arg5] [1, 1] [1, 1] : memref<1x4xf32, strided<[4, 1], offset: ?>> to memref<1x1xf32, strided<[4, 1], offset: ?>>
 // CHECK-NEXT:            %subview_12 = memref.subview %subview_6[%arg5, 0] [1, 1] [1, 1] : memref<4x1xf32, strided<[4, 1], offset: ?>> to memref<1x1xf32, strided<[4, 1], offset: ?>>
 // CHECK-NEXT:            %subview_13 = memref.subview %subview_7[0, 0] [1, 1] [1, 1] : memref<1x1xf32, strided<[4, 1], offset: ?>> to memref<1x1xf32, strided<[4, 1], offset: ?>>
-// CHECK-NEXT:            linalg.matmul {__id0__, loop.add_attributes = ["JoeDassin"]} ins(%subview_11, %subview_12 : memref<1x1xf32, strided<[4, 1], offset: ?>>, memref<1x1xf32, strided<[4, 1], offset: ?>>) outs(%subview_13 : memref<1x1xf32, strided<[4, 1], offset: ?>>)
-// CHECK-NEXT:          } {__id0__k}
-// CHECK-NEXT:        } {__id0__j}
-// CHECK-NEXT:      } {JoeDassin, __id0__i}
+// CHECK-NEXT:            linalg.matmul {__node0__, loop.add_attributes = ["JoeDassin"]} ins(%subview_11, %subview_12 : memref<1x1xf32, strided<[4, 1], offset: ?>>, memref<1x1xf32, strided<[4, 1], offset: ?>>) outs(%subview_13 : memref<1x1xf32, strided<[4, 1], offset: ?>>)
+// CHECK-NEXT:          } {k}
+// CHECK-NEXT:        } {j}
+// CHECK-NEXT:      } {JoeDassin, i}
 // CHECK-NEXT:      return
 // CHECK-NEXT:    }
 // CHECK-NEXT:  }

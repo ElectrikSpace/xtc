@@ -24,15 +24,15 @@ func.func @myfun(
 // CHECK-NEXT:    func.func @myfun(%arg0: memref<16x4xf32> {llvm.noalias}, %arg1: memref<4x8xf32> {llvm.noalias}, %arg2: memref<16x8xf32> {llvm.noalias}) {
 // CHECK-NEXT:      %cst = arith.constant 0.000000e+00 : f32
 // CHECK-NEXT:      linalg.fill ins(%cst : f32) outs(%arg2 : memref<16x8xf32>)
-// CHECK-NEXT:      linalg.matmul {__id0__} ins(%arg0, %arg1 : memref<16x4xf32>, memref<4x8xf32>) outs(%arg2 : memref<16x8xf32>)
+// CHECK-NEXT:      linalg.matmul {__node0__} ins(%arg0, %arg1 : memref<16x4xf32>, memref<4x8xf32>) outs(%arg2 : memref<16x8xf32>)
 // CHECK-NEXT:      return
 // CHECK-NEXT:    }
 // CHECK-NEXT:    transform.named_sequence @__transform_main(%arg0: !transform.any_op {transform.readonly}) {
-// CHECK-NEXT:      %0 = transform.structured.match attributes {__id0__} in %arg0 : (!transform.any_op) -> !transform.any_op
+// CHECK-NEXT:      %0 = transform.structured.match attributes {__node0__} in %arg0 : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op, %loops = transform.structured.tile_using_for %0 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops "__id0__i" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops "i" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_0, %loops_1 = transform.structured.tile_using_for %tiled_linalg_op tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_1 "__id0__k" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_1 "k" : !transform.any_op
 // CHECK-NEXT:      %1 = transform.get_parent_op %loops {isolated_from_above} : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      %2 = transform.structured.vectorize_children_and_apply_patterns %1 : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      transform.apply_patterns to %2 {

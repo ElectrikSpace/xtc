@@ -50,9 +50,9 @@ func.func @myfun(
 // CHECK-NEXT:          %subview_1 = memref.subview %subview[0, %arg4] [1, 64] [1, 1] : memref<1x256xf32, strided<[256, 1], offset: ?>> to memref<1x64xf32, strided<[256, 1], offset: ?>>
 // CHECK-NEXT:          scf.for %arg5 = %c0 to %c1 step %c1 {
 // CHECK-NEXT:            vector.transfer_write %cst_0, %subview_1[%c0, %c0] {in_bounds = [true, true]} : vector<1x64xf32>, memref<1x64xf32, strided<[256, 1], offset: ?>>
-// CHECK-NEXT:          } {__id0__i1}
-// CHECK-NEXT:        } {__id0__j}
-// CHECK-NEXT:      } {__id0__i}
+// CHECK-NEXT:          } {i1}
+// CHECK-NEXT:        } {j}
+// CHECK-NEXT:      } {i}
 // CHECK-NEXT:      scf.for %arg3 = %c0 to %c256 step %c1 {
 // CHECK-NEXT:        %subview = memref.subview %arg0[%arg3, 0] [1, 512] [1, 1] : memref<256x512xf32> to memref<1x512xf32, strided<[512, 1], offset: ?>>
 // CHECK-NEXT:        %subview_1 = memref.subview %arg1[0, 0] [512, 256] [1, 1] : memref<512x256xf32> to memref<512x256xf32, strided<[256, 1]>>
@@ -159,9 +159,9 @@ func.func @myfun(
 // CHECK-NEXT:            %70 = vector.fma %68, %66, %69 : vector<64xf32>
 // CHECK-NEXT:            %71 = vector.insert %70, %cst_0 [0] : vector<64xf32> into vector<1x64xf32>
 // CHECK-NEXT:            vector.transfer_write %71, %subview_4[%c0, %c0] {in_bounds = [true, true]} : vector<1x64xf32>, memref<1x64xf32, strided<[256, 1], offset: ?>>
-// CHECK-NEXT:          } {__id1__k}
-// CHECK-NEXT:        } {__id1__j}
-// CHECK-NEXT:      } {__id1__i}
+// CHECK-NEXT:          } {k}
+// CHECK-NEXT:        } {j}
+// CHECK-NEXT:      } {i}
 // CHECK-NEXT:      return
 // CHECK-NEXT:    }
 // CHECK-NEXT:  }

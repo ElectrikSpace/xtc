@@ -26,15 +26,15 @@ func.func @myfun(
 // CHECK-NEXT:    transform.named_sequence @__transform_main(%arg0: !transform.any_op {transform.readonly}) {
 // CHECK-NEXT:      %0 = transform.structured.match attributes {__my_matmul__} in %arg0 : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op, %loops = transform.structured.tile_using_for %0 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops "__my_matmul__i" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops "i" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_0, %loops_1 = transform.structured.tile_using_for %tiled_linalg_op tile_sizes [0, 64, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_1 "__my_matmul__j" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_1 "j" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_2, %loops_3 = transform.structured.tile_using_for %tiled_linalg_op_0 tile_sizes [0, 0, 8] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_3 "__my_matmul__k" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_3 "k" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %tiled_linalg_op_2 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_5 "__my_matmul__i1" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_5 "i1" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_6, %loops_7 = transform.structured.tile_using_for %tiled_linalg_op_4 tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_7 "__my_matmul__k1" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_7 "k1" : !transform.any_op
 // CHECK-NEXT:      %1 = transform.get_parent_op %loops {isolated_from_above} : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      %2 = transform.structured.vectorize_children_and_apply_patterns %1 : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      transform.apply_patterns to %2 {

@@ -29,27 +29,27 @@ func.func @myfun(
 // CHECK-NEXT:    func.func @myfun(%arg0: memref<250x480xf32> {llvm.noalias}, %arg1: memref<480x640xf32> {llvm.noalias}, %arg2: memref<250x640xf32> {llvm.noalias}) {
 // CHECK-NEXT:      %cst = arith.constant 0.000000e+00 : f32
 // CHECK-NEXT:      linalg.fill ins(%cst : f32) outs(%arg2 : memref<250x640xf32>)
-// CHECK-NEXT:      linalg.matmul {__id0__} ins(%arg0, %arg1 : memref<250x480xf32>, memref<480x640xf32>) outs(%arg2 : memref<250x640xf32>)
+// CHECK-NEXT:      linalg.matmul {__node0__} ins(%arg0, %arg1 : memref<250x480xf32>, memref<480x640xf32>) outs(%arg2 : memref<250x640xf32>)
 // CHECK-NEXT:      return
 // CHECK-NEXT:    }
 // CHECK-NEXT:    transform.named_sequence @__transform_main(%arg0: !transform.any_op {transform.readonly}) {
-// CHECK-NEXT:      %0 = transform.structured.match attributes {__id0__} in %arg0 : (!transform.any_op) -> !transform.any_op
+// CHECK-NEXT:      %0 = transform.structured.match attributes {__node0__} in %arg0 : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op, %loops = transform.structured.tile_using_for %0 tile_sizes [5, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops "__id0__i" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops "i" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_0, %loops_1 = transform.structured.tile_using_for %tiled_linalg_op tile_sizes [0, 64, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_1 "__id0__j" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_1 "j" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_2, %loops_3 = transform.structured.tile_using_for %tiled_linalg_op_0 tile_sizes [0, 0, 96] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_3 "__id0__k" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_3 "k" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %tiled_linalg_op_2 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_5 "__id0__i1" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_5 "i1" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_6, %loops_7 = transform.structured.tile_using_for %tiled_linalg_op_4 tile_sizes [0, 0, 8] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_7 "__id0__k1" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_7 "k1" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_8, %loops_9 = transform.structured.tile_using_for %tiled_linalg_op_6 tile_sizes [0, 32, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_9 "__id0__j1" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_9 "j1" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_10, %loops_11 = transform.structured.tile_using_for %tiled_linalg_op_8 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_11 "__id0__i2" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_11 "i2" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_12, %loops_13 = transform.structured.tile_using_for %tiled_linalg_op_10 tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_13 "__id0__k2" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_13 "k2" : !transform.any_op
 // CHECK-NEXT:      transform.loop.unroll %loops_13 {factor = 8 : i64} : !transform.any_op
 // CHECK-NEXT:      transform.loop.unroll %loops_11 {factor = 1 : i64} : !transform.any_op
 // CHECK-NEXT:      %1 = transform.get_parent_op %loops {isolated_from_above} : (!transform.any_op) -> !transform.any_op

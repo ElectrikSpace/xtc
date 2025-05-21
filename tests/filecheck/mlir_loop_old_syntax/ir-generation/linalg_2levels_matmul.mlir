@@ -161,12 +161,12 @@ func.func @myfun(
 // CHECK-NEXT:                  %70 = vector.fma %68, %66, %69 : vector<32xf32>
 // CHECK-NEXT:                  %71 = vector.insert %70, %cst [0] : vector<32xf32> into vector<1x32xf32>
 // CHECK-NEXT:                  vector.transfer_write %71, %subview_13[%c0, %c0] {in_bounds = [true, true]} : vector<1x32xf32>, memref<1x32xf32, strided<[640, 1], offset: ?>>
-// CHECK-NEXT:                } {__id0__j1}
-// CHECK-NEXT:              } {__id0__k1}
-// CHECK-NEXT:            } {__id0__i1}
-// CHECK-NEXT:          } {__id0__k}
-// CHECK-NEXT:        } {__id0__j}
-// CHECK-NEXT:      } {__id0__i}
+// CHECK-NEXT:                } {j1}
+// CHECK-NEXT:              } {k1}
+// CHECK-NEXT:            } {i1}
+// CHECK-NEXT:          } {k}
+// CHECK-NEXT:        } {j}
+// CHECK-NEXT:      } {i}
 // CHECK-NEXT:      return
 // CHECK-NEXT:    }
 // CHECK-NEXT:  }
