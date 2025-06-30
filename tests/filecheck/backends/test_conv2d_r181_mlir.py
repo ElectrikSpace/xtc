@@ -29,7 +29,7 @@ comp = impl.get_compiler(
     dump_file="conv2d_nhwc_r181_mlir",
     print_source_ir=True,
     print_transformed_ir=True,
-    vectors_size = 16
+    vectors_size = 16,
 )
 module = comp.compile(sched)
 executor = module.get_executor(validate=True)
@@ -42,8 +42,8 @@ print(f"CODE: {res}")
 # CHECK-NEXT:  module attributes {transform.with_named_sequence} {
 # CHECK-NEXT:    func.func @conv2d_nhwc_r181(%arg0: memref<1x230x230x3xf32> {llvm.noalias}, %arg1: memref<7x7x3x64xf32> {llvm.noalias}, %arg2: memref<1x112x112x64xf32> {llvm.noalias}) {
 # CHECK-NEXT:      %cst = arith.constant 0.000000e+00 : f32
-# CHECK-NEXT:      linalg.fill {__xtc_id_O_fill_} ins(%cst : f32) outs(%arg2 : memref<1x112x112x64xf32>)
-# CHECK-NEXT:      linalg.generic {indexing_maps = [#map, #map1, #map2], iterator_types = ["parallel", "parallel", "parallel", "parallel", "reduction", "reduction", "reduction"]} ins(%arg0, %arg1 : memref<1x230x230x3xf32>, memref<7x7x3x64xf32>) outs(%arg2 : memref<1x112x112x64xf32>) attrs =  {__xtc_id_O_reduce_} {
+# CHECK-NEXT:      linalg.fill {__xtc_id_O_0_} ins(%cst : f32) outs(%arg2 : memref<1x112x112x64xf32>)
+# CHECK-NEXT:      linalg.generic {indexing_maps = [#map, #map1, #map2], iterator_types = ["parallel", "parallel", "parallel", "parallel", "reduction", "reduction", "reduction"]} ins(%arg0, %arg1 : memref<1x230x230x3xf32>, memref<7x7x3x64xf32>) outs(%arg2 : memref<1x112x112x64xf32>) attrs =  {__xtc_id_O_} {
 # CHECK-NEXT:      ^bb0(%in: f32, %in_0: f32, %out: f32):
 # CHECK-NEXT:        %0 = arith.mulf %in, %in_0 : f32
 # CHECK-NEXT:        %1 = arith.addf %out, %0 : f32
@@ -52,7 +52,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:      return
 # CHECK-NEXT:    }
 # CHECK-NEXT:    transform.named_sequence @__transform_main(%arg0: !transform.any_op {transform.readonly}) {
-# CHECK-NEXT:      %0 = transform.structured.match attributes {__xtc_id_O_fill_} in %arg0 : (!transform.any_op) -> !transform.any_op
+# CHECK-NEXT:      %0 = transform.structured.match attributes {__xtc_id_O_0_} in %arg0 : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op, %loops = transform.structured.tile_using_for %0 tile_sizes [1, 0, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops "b" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_0, %loops_1 = transform.structured.tile_using_for %tiled_linalg_op tile_sizes [0, 1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
@@ -61,7 +61,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:      transform.annotate %loops_3 "w" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %tiled_linalg_op_2 tile_sizes [0, 0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops_5 "f" : !transform.any_op
-# CHECK-NEXT:      %1 = transform.structured.match attributes {__xtc_id_O_reduce_} in %arg0 : (!transform.any_op) -> !transform.any_op
+# CHECK-NEXT:      %1 = transform.structured.match attributes {__xtc_id_O_} in %arg0 : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_6, %loops_7 = transform.structured.tile_using_for %1 tile_sizes [1, 0, 0, 0, 0, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops_7 "b" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_8, %loops_9 = transform.structured.tile_using_for %tiled_linalg_op_6 tile_sizes [0, 1, 0, 0, 0, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
@@ -452,11 +452,11 @@ print(f"CODE: {res}")
 # CHECK-NEXT:  graph:
 # CHECK-NEXT:    name: conv2d_nhwc_r181
 # CHECK-NEXT:    inputs:
-# CHECK-NEXT:    - %0
-# CHECK-NEXT:    - %1
+# CHECK-NEXT:    - %0 : 1x230x230x3xfloat32
+# CHECK-NEXT:    - %1 : 7x7x3x64xfloat32
 # CHECK-NEXT:    outputs:
-# CHECK-NEXT:    - %2
+# CHECK-NEXT:    - %2 : 1x112x112x64xfloat32
 # CHECK-NEXT:    nodes:
-# CHECK-NEXT:    - %2: conv2d(%0, %1, stride=(2, 2)) {name = 'O'}
+# CHECK-NEXT:    - %2: conv2d(%0, %1, stride=(2, 2)) {name = 'O'} : [1x230x230x3xfloat32, 7x7x3x64xfloat32] -> [1x112x112x64xfloat32]
 # CHECK-NEXT:  
 # CHECK-NEXT:  CODE: 0

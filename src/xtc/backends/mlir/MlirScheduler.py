@@ -21,6 +21,7 @@ class MlirScheduler(itf.schd.Scheduler):
         self,
         backend: "backend.MlirBackend",
         nodes_schedulers: list["MlirScheduler"] | None = None,
+        nodes: list[str] | None = None,
     ) -> None:
         from .MlirGraphBackend import MlirGraphBackend
         from .MlirNodeBackend import MlirNodeBackend
@@ -28,9 +29,14 @@ class MlirScheduler(itf.schd.Scheduler):
         self._backend = backend
         if isinstance(backend, MlirGraphBackend):
             if nodes_schedulers is None:
-                self._nodes_schedulers = [
-                    MlirScheduler(node_impl) for node_impl in backend.nodes.values()
-                ]
+                if nodes is None:
+                    self._nodes_schedulers = [
+                        MlirScheduler(node_impl) for node_impl in backend.nodes.values()
+                    ]
+                else:
+                    self._nodes_schedulers = [
+                        MlirScheduler(backend.nodes[name]) for name in nodes
+                    ]
             else:
                 self._nodes_schedulers = nodes_schedulers
             # TODO: by default, when a graph, we assume to schedule the

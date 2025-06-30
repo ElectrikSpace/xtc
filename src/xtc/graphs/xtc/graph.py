@@ -41,7 +41,7 @@ class XTCGraph(Graph):
 
     @property
     @override
-    def nodes(self) -> Mapping[str, Node]:
+    def nodes(self) -> Mapping[str, XTCNode]:
         return {node.uid: node for node in self._nodes}
 
     @property

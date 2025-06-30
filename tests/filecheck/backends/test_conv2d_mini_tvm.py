@@ -32,12 +32,12 @@ print(f"CODE: {res}")
 # CHECK:       graph:
 # CHECK-NEXT:    name: conv2d_nhwc_mini
 # CHECK-NEXT:    inputs:
-# CHECK-NEXT:    - %0
-# CHECK-NEXT:    - %1
+# CHECK-NEXT:    - %0 : 1x10x10x3xfloat32
+# CHECK-NEXT:    - %1 : 3x3x3x16xfloat32
 # CHECK-NEXT:    outputs:
-# CHECK-NEXT:    - %2
+# CHECK-NEXT:    - %2 : 1x8x8x16xfloat32
 # CHECK-NEXT:    nodes:
-# CHECK-NEXT:    - %2: conv2d(%0, %1, stride=(1, 1)) {name = 'O'}
+# CHECK-NEXT:    - %2: conv2d(%0, %1, stride=(1, 1)) {name = 'O'} : [1x10x10x3xfloat32, 3x3x3x16xfloat32] -> [1x8x8x16xfloat32]
 # CHECK-NEXT:  
 # CHECK-NEXT:  # from tvm.script import ir as I
 # CHECK-NEXT:  # from tvm.script import tir as T

@@ -37,12 +37,12 @@ print(f"CODE: {res}")
 # CHECK:       graph:
 # CHECK-NEXT:    name: matmul
 # CHECK-NEXT:    inputs:
-# CHECK-NEXT:    - %0
-# CHECK-NEXT:    - %1
+# CHECK-NEXT:    - %0 : 4x512xfloat32
+# CHECK-NEXT:    - %1 : 512x32xfloat32
 # CHECK-NEXT:    outputs:
-# CHECK-NEXT:    - %2
+# CHECK-NEXT:    - %2 : 4x32xfloat32
 # CHECK-NEXT:    nodes:
-# CHECK-NEXT:    - %2: matmul(%0, %1) {name = 'C'}
+# CHECK-NEXT:    - %2: matmul(%0, %1) {name = 'C'} : [4x512xfloat32, 512x32xfloat32] -> [4x32xfloat32]
 # CHECK-NEXT:  
 # CHECK-NEXT:  # from tvm.script import ir as I
 # CHECK-NEXT:  # from tvm.script import tir as T

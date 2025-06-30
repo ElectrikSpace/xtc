@@ -19,7 +19,7 @@ impl = Backend(graph, always_vectorize=False, no_alias=True)
 sch = impl.get_scheduler()
 descript_scheduler(
     scheduler = sch,
-    node_name = "C_reduce",
+    node_name = "C",
     abstract_axis = ["i","j","k"],
     spec = {
         "k": {},
@@ -47,25 +47,25 @@ print(f"CODE: {res}")
 # CHECK-NEXT:  module attributes {transform.with_named_sequence} {
 # CHECK-NEXT:    func.func @matmul(%arg0: memref<4x512xf32> {llvm.noalias}, %arg1: memref<512x32xf32> {llvm.noalias}, %arg2: memref<4x32xf32> {llvm.noalias}) {
 # CHECK-NEXT:      %cst = arith.constant 0.000000e+00 : f32
-# CHECK-NEXT:      linalg.fill {__xtc_id_C_fill_} ins(%cst : f32) outs(%arg2 : memref<4x32xf32>)
-# CHECK-NEXT:      linalg.matmul {__xtc_id_C_reduce_} ins(%arg0, %arg1 : memref<4x512xf32>, memref<512x32xf32>) outs(%arg2 : memref<4x32xf32>)
+# CHECK-NEXT:      linalg.fill {__xtc_id_C_0_} ins(%cst : f32) outs(%arg2 : memref<4x32xf32>)
+# CHECK-NEXT:      linalg.matmul {__xtc_id_C_} ins(%arg0, %arg1 : memref<4x512xf32>, memref<512x32xf32>) outs(%arg2 : memref<4x32xf32>)
 # CHECK-NEXT:      return
 # CHECK-NEXT:    }
 # CHECK-NEXT:    transform.named_sequence @__transform_main(%arg0: !transform.any_op {transform.readonly}) {
-# CHECK-NEXT:      %0 = transform.structured.match attributes {__xtc_id_C_fill_} in %arg0 : (!transform.any_op) -> !transform.any_op
+# CHECK-NEXT:      %0 = transform.structured.match attributes {__xtc_id_C_0_} in %arg0 : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op, %loops = transform.structured.tile_using_for %0 tile_sizes [1, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops "i" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_0, %loops_1 = transform.structured.tile_using_for %tiled_linalg_op tile_sizes [0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops_1 "j" : !transform.any_op
-# CHECK-NEXT:      %1 = transform.structured.match attributes {__xtc_id_C_reduce_} in %arg0 : (!transform.any_op) -> !transform.any_op
+# CHECK-NEXT:      %1 = transform.structured.match attributes {__xtc_id_C_} in %arg0 : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_2, %loops_3 = transform.structured.tile_using_for %1 tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-# CHECK-NEXT:      transform.annotate %loops_3 "C_reduce/k0" : !transform.any_op
+# CHECK-NEXT:      transform.annotate %loops_3 "C/k0" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %tiled_linalg_op_2 tile_sizes [2, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-# CHECK-NEXT:      transform.annotate %loops_5 "C_reduce/i0" : !transform.any_op
+# CHECK-NEXT:      transform.annotate %loops_5 "C/i0" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_6, %loops_7 = transform.structured.tile_using_for %tiled_linalg_op_4 tile_sizes [0, 16, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-# CHECK-NEXT:      transform.annotate %loops_7 "C_reduce/j0" : !transform.any_op
+# CHECK-NEXT:      transform.annotate %loops_7 "C/j0" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_8, %loops_9 = transform.structured.tile_using_for %tiled_linalg_op_6 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-# CHECK-NEXT:      transform.annotate %loops_9 "C_reduce/i1" : !transform.any_op
+# CHECK-NEXT:      transform.annotate %loops_9 "C/i1" : !transform.any_op
 # CHECK-NEXT:      transform.structured.vectorize %tiled_linalg_op_8 : !transform.any_op
 # CHECK-NEXT:      transform.loop.unroll %loops_9 {factor = 2 : i64} : !transform.any_op
 # CHECK-NEXT:      transform.yield 
@@ -88,7 +88,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:        %c1_3 = arith.constant 1 : index
 # CHECK-NEXT:        scf.for %arg4 = %c0_2 to %c32 step %c1_3 {
 # CHECK-NEXT:          %subview_4 = memref.subview %subview[0, %arg4] [1, 1] [1, 1] : memref<1x32xf32, strided<[32, 1], offset: ?>> to memref<1x1xf32, strided<[32, 1], offset: ?>>
-# CHECK-NEXT:          linalg.fill {__xtc_id_C_fill_} ins(%cst : f32) outs(%subview_4 : memref<1x1xf32, strided<[32, 1], offset: ?>>)
+# CHECK-NEXT:          linalg.fill {__xtc_id_C_0_} ins(%cst : f32) outs(%subview_4 : memref<1x1xf32, strided<[32, 1], offset: ?>>)
 # CHECK-NEXT:        } {j}
 # CHECK-NEXT:      } {i}
 # CHECK-NEXT:      %c0_0 = arith.constant 0 : index
@@ -153,9 +153,9 @@ print(f"CODE: {res}")
 # CHECK-NEXT:            %11 = vector.multi_reduction <add>, %10, %9 [2] : vector<1x16x1xf32> to vector<1x16xf32>
 # CHECK-NEXT:            %c0_39 = arith.constant 0 : index
 # CHECK-NEXT:            vector.transfer_write %11, %subview_31[%c0_39, %c0_39] : vector<1x16xf32>, memref<1x16xf32, strided<[32, 1], offset: ?>>
-# CHECK-NEXT:          } {"C_reduce/j0"}
-# CHECK-NEXT:        } {"C_reduce/i0"}
-# CHECK-NEXT:      } {"C_reduce/k0"}
+# CHECK-NEXT:          } {"C/j0"}
+# CHECK-NEXT:        } {"C/i0"}
+# CHECK-NEXT:      } {"C/k0"}
 # CHECK-NEXT:      return
 # CHECK-NEXT:    }
 # CHECK-NEXT:  }

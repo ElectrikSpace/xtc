@@ -37,17 +37,17 @@ print(f"CODE: {res}")
 # CHECK-NEXT:  module attributes {transform.with_named_sequence} {
 # CHECK-NEXT:    func.func @matmul(%arg0: memref<4x512xf32> {llvm.noalias}, %arg1: memref<512x32xf32> {llvm.noalias}, %arg2: memref<4x32xf32> {llvm.noalias}) {
 # CHECK-NEXT:      %cst = arith.constant 0.000000e+00 : f32
-# CHECK-NEXT:      linalg.fill {__xtc_id_C_fill_} ins(%cst : f32) outs(%arg2 : memref<4x32xf32>)
-# CHECK-NEXT:      linalg.matmul {__xtc_id_C_reduce_} ins(%arg0, %arg1 : memref<4x512xf32>, memref<512x32xf32>) outs(%arg2 : memref<4x32xf32>)
+# CHECK-NEXT:      linalg.fill {__xtc_id_C_0_} ins(%cst : f32) outs(%arg2 : memref<4x32xf32>)
+# CHECK-NEXT:      linalg.matmul {__xtc_id_C_} ins(%arg0, %arg1 : memref<4x512xf32>, memref<512x32xf32>) outs(%arg2 : memref<4x32xf32>)
 # CHECK-NEXT:      return
 # CHECK-NEXT:    }
 # CHECK-NEXT:    transform.named_sequence @__transform_main(%arg0: !transform.any_op {transform.readonly}) {
-# CHECK-NEXT:      %0 = transform.structured.match attributes {__xtc_id_C_fill_} in %arg0 : (!transform.any_op) -> !transform.any_op
+# CHECK-NEXT:      %0 = transform.structured.match attributes {__xtc_id_C_0_} in %arg0 : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op, %loops = transform.structured.tile_using_for %0 tile_sizes [1, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops "i" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_0, %loops_1 = transform.structured.tile_using_for %tiled_linalg_op tile_sizes [0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops_1 "j" : !transform.any_op
-# CHECK-NEXT:      %1 = transform.structured.match attributes {__xtc_id_C_reduce_} in %arg0 : (!transform.any_op) -> !transform.any_op
+# CHECK-NEXT:      %1 = transform.structured.match attributes {__xtc_id_C_} in %arg0 : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_2, %loops_3 = transform.structured.tile_using_for %1 tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops_3 "k" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %tiled_linalg_op_2 tile_sizes [2, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
@@ -78,7 +78,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:        %c1_3 = arith.constant 1 : index
 # CHECK-NEXT:        scf.for %arg4 = %c0_2 to %c32 step %c1_3 {
 # CHECK-NEXT:          %subview_4 = memref.subview %subview[0, %arg4] [1, 1] [1, 1] : memref<1x32xf32, strided<[32, 1], offset: ?>> to memref<1x1xf32, strided<[32, 1], offset: ?>>
-# CHECK-NEXT:          linalg.fill {__xtc_id_C_fill_} ins(%cst : f32) outs(%subview_4 : memref<1x1xf32, strided<[32, 1], offset: ?>>)
+# CHECK-NEXT:          linalg.fill {__xtc_id_C_0_} ins(%cst : f32) outs(%subview_4 : memref<1x1xf32, strided<[32, 1], offset: ?>>)
 # CHECK-NEXT:        } {j}
 # CHECK-NEXT:      } {i}
 # CHECK-NEXT:      %c0_0 = arith.constant 0 : index
@@ -153,11 +153,11 @@ print(f"CODE: {res}")
 # CHECK-NEXT:  graph:
 # CHECK-NEXT:    name: matmul
 # CHECK-NEXT:    inputs:
-# CHECK-NEXT:    - %0
-# CHECK-NEXT:    - %1
+# CHECK-NEXT:    - %0 : 4x512xfloat32
+# CHECK-NEXT:    - %1 : 512x32xfloat32
 # CHECK-NEXT:    outputs:
-# CHECK-NEXT:    - %2
+# CHECK-NEXT:    - %2 : 4x32xfloat32
 # CHECK-NEXT:    nodes:
-# CHECK-NEXT:    - %2: matmul(%0, %1) {name = 'C'}
+# CHECK-NEXT:    - %2: matmul(%0, %1) {name = 'C'} : [4x512xfloat32, 512x32xfloat32] -> [4x32xfloat32]
 # CHECK-NEXT:  
 # CHECK-NEXT:  CODE: 0

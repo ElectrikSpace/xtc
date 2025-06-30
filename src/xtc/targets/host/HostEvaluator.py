@@ -44,8 +44,7 @@ class HostEvaluator(itf.exec.Evaluator):
 
     @override
     def evaluate(self) -> tuple[list[float], int, str]:
-        parameters = self._parameters
-        if parameters is None:
+        if self._parameters is None:
             assert self._np_inputs_spec is not None
             assert self._np_outputs_spec is not None
             inputs_spec = self._np_inputs_spec()
@@ -57,6 +56,16 @@ class HostEvaluator(itf.exec.Evaluator):
                 [NDArray(inp) for inp in inputs],
                 [NDArray(out) for out in outputs],
             )
+        else:
+            inputs, outputs = self._parameters
+            nd_inputs = [
+                NDArray(inp) if isinstance(inp, np.ndarray) else inp for inp in inputs
+            ]
+            nd_outputs = [
+                NDArray(out) if isinstance(out, np.ndarray) else out for out in outputs
+            ]
+            parameters = (nd_inputs, nd_outputs)
+
         ref_outputs = []
         if self._validate:
             assert self._reference_impl is not None
@@ -66,7 +75,7 @@ class HostEvaluator(itf.exec.Evaluator):
             ]
             self._reference_impl(*ref_inputs, *ref_outputs)
 
-        return load_and_evaluate(
+        results = load_and_evaluate(
             module_file=self._module.file_name,
             module_name=self._module.name,
             payload_name=self._module.payload_name,
@@ -78,6 +87,15 @@ class HostEvaluator(itf.exec.Evaluator):
             min_repeat_ms=self._min_repeat_ms,
             number=self._number,
         )
+
+        if self._parameters is not None:
+            _, outputs = self._parameters
+            _, outputs_copy = parameters
+            for out, out_copy in zip(outputs, outputs_copy):
+                if isinstance(out, np.ndarray):
+                    out_copy.numpy(out=out)
+
+        return results
 
     @property
     @override

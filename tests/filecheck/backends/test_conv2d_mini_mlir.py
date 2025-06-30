@@ -36,8 +36,8 @@ print(f"CODE: {res}")
 # CHECK-NEXT:  module attributes {transform.with_named_sequence} {
 # CHECK-NEXT:    func.func @conv2d_nhwc_mini(%arg0: memref<1x10x10x3xf32> {llvm.noalias}, %arg1: memref<3x3x3x16xf32> {llvm.noalias}, %arg2: memref<1x8x8x16xf32> {llvm.noalias}) {
 # CHECK-NEXT:      %cst = arith.constant 0.000000e+00 : f32
-# CHECK-NEXT:      linalg.fill {__xtc_id_O_fill_} ins(%cst : f32) outs(%arg2 : memref<1x8x8x16xf32>)
-# CHECK-NEXT:      linalg.generic {indexing_maps = [#map, #map1, #map2], iterator_types = ["parallel", "parallel", "parallel", "parallel", "reduction", "reduction", "reduction"]} ins(%arg0, %arg1 : memref<1x10x10x3xf32>, memref<3x3x3x16xf32>) outs(%arg2 : memref<1x8x8x16xf32>) attrs =  {__xtc_id_O_reduce_} {
+# CHECK-NEXT:      linalg.fill {__xtc_id_O_0_} ins(%cst : f32) outs(%arg2 : memref<1x8x8x16xf32>)
+# CHECK-NEXT:      linalg.generic {indexing_maps = [#map, #map1, #map2], iterator_types = ["parallel", "parallel", "parallel", "parallel", "reduction", "reduction", "reduction"]} ins(%arg0, %arg1 : memref<1x10x10x3xf32>, memref<3x3x3x16xf32>) outs(%arg2 : memref<1x8x8x16xf32>) attrs =  {__xtc_id_O_} {
 # CHECK-NEXT:      ^bb0(%in: f32, %in_0: f32, %out: f32):
 # CHECK-NEXT:        %0 = arith.mulf %in, %in_0 : f32
 # CHECK-NEXT:        %1 = arith.addf %out, %0 : f32
@@ -46,7 +46,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:      return
 # CHECK-NEXT:    }
 # CHECK-NEXT:    transform.named_sequence @__transform_main(%arg0: !transform.any_op {transform.readonly}) {
-# CHECK-NEXT:      %0 = transform.structured.match attributes {__xtc_id_O_fill_} in %arg0 : (!transform.any_op) -> !transform.any_op
+# CHECK-NEXT:      %0 = transform.structured.match attributes {__xtc_id_O_0_} in %arg0 : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op, %loops = transform.structured.tile_using_for %0 tile_sizes [1, 0, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops "b" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_0, %loops_1 = transform.structured.tile_using_for %tiled_linalg_op tile_sizes [0, 1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
@@ -55,7 +55,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:      transform.annotate %loops_3 "w" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %tiled_linalg_op_2 tile_sizes [0, 0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops_5 "f" : !transform.any_op
-# CHECK-NEXT:      %1 = transform.structured.match attributes {__xtc_id_O_reduce_} in %arg0 : (!transform.any_op) -> !transform.any_op
+# CHECK-NEXT:      %1 = transform.structured.match attributes {__xtc_id_O_} in %arg0 : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_6, %loops_7 = transform.structured.tile_using_for %1 tile_sizes [1, 0, 0, 0, 0, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 # CHECK-NEXT:      transform.annotate %loops_7 "b" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_8, %loops_9 = transform.structured.tile_using_for %tiled_linalg_op_6 tile_sizes [0, 1, 0, 0, 0, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
@@ -101,7 +101,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:            %c1_12 = arith.constant 1 : index
 # CHECK-NEXT:            scf.for %arg6 = %c0_11 to %c16 step %c1_12 {
 # CHECK-NEXT:              %subview_13 = memref.subview %subview_10[0, 0, 0, %arg6] [1, 1, 1, 1] [1, 1, 1, 1] : memref<1x1x1x16xf32, strided<[1024, 128, 16, 1], offset: ?>> to memref<1x1x1x1xf32, strided<[1024, 128, 16, 1], offset: ?>>
-# CHECK-NEXT:              linalg.fill {__xtc_id_O_fill_} ins(%cst : f32) outs(%subview_13 : memref<1x1x1x1xf32, strided<[1024, 128, 16, 1], offset: ?>>)
+# CHECK-NEXT:              linalg.fill {__xtc_id_O_0_} ins(%cst : f32) outs(%subview_13 : memref<1x1x1x1xf32, strided<[1024, 128, 16, 1], offset: ?>>)
 # CHECK-NEXT:            } {f}
 # CHECK-NEXT:          } {w}
 # CHECK-NEXT:        } {h}
@@ -155,7 +155,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:                    %subview_36 = memref.subview %subview_30[0, 0, 0, %arg9] [1, 1, 1, 1] [1, 1, 1, 1] : memref<1x1x1x3xf32, strided<[300, 30, 3, 1], offset: ?>> to memref<1x1x1x1xf32, strided<[300, 30, 3, 1], offset: ?>>
 # CHECK-NEXT:                    %subview_37 = memref.subview %subview_31[0, 0, %arg9, 0] [1, 1, 1, 1] [1, 1, 1, 1] : memref<1x1x3x1xf32, strided<[144, 48, 16, 1], offset: ?>> to memref<1x1x1x1xf32, strided<[144, 48, 16, 1], offset: ?>>
 # CHECK-NEXT:                    %subview_38 = memref.subview %subview_32[0, 0, 0, 0] [1, 1, 1, 1] [1, 1, 1, 1] : memref<1x1x1x1xf32, strided<[1024, 128, 16, 1], offset: ?>> to memref<1x1x1x1xf32, strided<[1024, 128, 16, 1], offset: ?>>
-# CHECK-NEXT:                    linalg.generic {indexing_maps = [#map, #map1, #map2], iterator_types = ["parallel", "parallel", "parallel", "parallel", "reduction", "reduction", "reduction"]} ins(%subview_36, %subview_37 : memref<1x1x1x1xf32, strided<[300, 30, 3, 1], offset: ?>>, memref<1x1x1x1xf32, strided<[144, 48, 16, 1], offset: ?>>) outs(%subview_38 : memref<1x1x1x1xf32, strided<[1024, 128, 16, 1], offset: ?>>) attrs =  {__xtc_id_O_reduce_} {
+# CHECK-NEXT:                    linalg.generic {indexing_maps = [#map, #map1, #map2], iterator_types = ["parallel", "parallel", "parallel", "parallel", "reduction", "reduction", "reduction"]} ins(%subview_36, %subview_37 : memref<1x1x1x1xf32, strided<[300, 30, 3, 1], offset: ?>>, memref<1x1x1x1xf32, strided<[144, 48, 16, 1], offset: ?>>) outs(%subview_38 : memref<1x1x1x1xf32, strided<[1024, 128, 16, 1], offset: ?>>) attrs =  {__xtc_id_O_} {
 # CHECK-NEXT:                    ^bb0(%in: f32, %in_39: f32, %out: f32):
 # CHECK-NEXT:                      %0 = arith.mulf %in, %in_39 : f32
 # CHECK-NEXT:                      %1 = arith.addf %out, %0 : f32
@@ -175,11 +175,11 @@ print(f"CODE: {res}")
 # CHECK-NEXT:  graph:
 # CHECK-NEXT:    name: conv2d_nhwc_mini
 # CHECK-NEXT:    inputs:
-# CHECK-NEXT:    - %0
-# CHECK-NEXT:    - %1
+# CHECK-NEXT:    - %0 : 1x10x10x3xfloat32
+# CHECK-NEXT:    - %1 : 3x3x3x16xfloat32
 # CHECK-NEXT:    outputs:
-# CHECK-NEXT:    - %2
+# CHECK-NEXT:    - %2 : 1x8x8x16xfloat32
 # CHECK-NEXT:    nodes:
-# CHECK-NEXT:    - %2: conv2d(%0, %1, stride=(1, 1)) {name = 'O'}
+# CHECK-NEXT:    - %2: conv2d(%0, %1, stride=(1, 1)) {name = 'O'} : [1x10x10x3xfloat32, 3x3x3x16xfloat32] -> [1x8x8x16xfloat32]
 # CHECK-NEXT:  
 # CHECK-NEXT:  CODE: 0

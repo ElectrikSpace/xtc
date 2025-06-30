@@ -37,12 +37,12 @@ print(f"CODE: {res}")
 # CHECK:       graph:
 # CHECK-NEXT:    name: conv2d_nhwc_r181
 # CHECK-NEXT:    inputs:
-# CHECK-NEXT:    - %0
-# CHECK-NEXT:    - %1
+# CHECK-NEXT:    - %0 : 1x230x230x3xfloat32
+# CHECK-NEXT:    - %1 : 7x7x3x64xfloat32
 # CHECK-NEXT:    outputs:
-# CHECK-NEXT:    - %2
+# CHECK-NEXT:    - %2 : 1x112x112x64xfloat32
 # CHECK-NEXT:    nodes:
-# CHECK-NEXT:    - %2: conv2d(%0, %1, stride=(2, 2)) {name = 'O'}
+# CHECK-NEXT:    - %2: conv2d(%0, %1, stride=(2, 2)) {name = 'O'} : [1x230x230x3xfloat32, 7x7x3x64xfloat32] -> [1x112x112x64xfloat32]
 # CHECK-NEXT:  
 # CHECK-NEXT:  # from tvm.script import ir as I
 # CHECK-NEXT:  # from tvm.script import tir as T

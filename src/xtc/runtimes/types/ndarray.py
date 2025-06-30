@@ -62,8 +62,18 @@ class NDArray:
         self._copy_to(self.handle, nparray.ctypes.data_as(ctypes.c_voidp))
         return nparray
 
-    def numpy(self):
-        return self._to_numpy()
+    def _copy_to_numpy(self, out):
+        assert out.flags["C_CONTIGUOUS"]
+        assert out.dtype == self.dtype
+        assert out.size == self.size
+        self._copy_to(self.handle, out.ctypes.data_as(ctypes.c_voidp))
+        return out
+
+    def numpy(self, out=None):
+        if out is None:
+            return self._to_numpy()
+        else:
+            return self._copy_to_numpy(out)
 
     @property
     def dtype_str(self):
