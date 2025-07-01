@@ -2,6 +2,24 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+import ctypes.util
+import subprocess
+import re
+
+
+def get_library_path(libname: str) -> str:
+    libfile = ctypes.util.find_library(libname)
+    assert libfile
+
+    result = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True)
+    for line in result.stdout.splitlines():
+        if libfile in line:
+            match = re.search(r"=>\s+(\S+)", line)
+            if match:
+                return match.group(1)
+    assert False
+
+
 transform_opts = [
     "transform-interpreter",
 ]
@@ -67,7 +85,7 @@ runtime_libs = [
     "libmlir_async_runtime.so",
 ]
 
-system_libs = ["/usr/lib/x86_64-linux-gnu/libomp.so.5"]
+system_libs = [get_library_path("omp")]
 
 dump_file = "/tmp/dump"
 
