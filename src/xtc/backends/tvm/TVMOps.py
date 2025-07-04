@@ -4,9 +4,12 @@
 #
 from abc import ABC, abstractmethod
 from collections.abc import Sequence, Mapping
+from tvm.relax import TensorStructInfo
 from typing_extensions import override
 import numpy as np
 from typing import Any, Type, cast, TypeAlias
+import tarfile
+import shutil
 
 from xtc.utils.math import mulall
 from xtc.graphs.xtc.expr import XTCTensorExpr  # TODO: generic
@@ -59,9 +62,7 @@ def get_tvm_native_target_options() -> str:
     return " ".join(target_options)
 
 
-def tvm_build_crt(
-    sch: Any, operation: Any, target: str, name: str | None = None
-) -> Any:
+def tvm_build_crt_args(target: str) -> dict[str, Any]:
     # We use system-lib with crt runtime such that DSO loading works
     # The generated .so can then be used:
     # - for static compilation as soon as the tvm runtime is provided
@@ -77,11 +78,43 @@ def tvm_build_crt(
     except:
         runtime_kwargs = {}
         target = f"{target} --system-lib --runtime=c"
-    return tvm.build(sch, operation, target=target, name=name, **runtime_kwargs)
+    return {
+        "target": target,
+        **runtime_kwargs,
+    }
+
+
+def tvm_build_crt(
+    sch: Any, operation: Any, target: str, name: str | None = None
+) -> Any:
+    build_kwargs = tvm_build_crt_args(target)
+    return tvm.build(sch, operation, name=name, **build_kwargs)
+
+
+def tvm_emit_c(
+    sch: te.Schedule, tensors: Sequence[TETensor], target: str, dir: str, name: str
+) -> Any:
+    target = "c -keys=arch -march=generic -mcpu=generic"
+    build_kwargs = tvm_build_crt_args(target)
+    config = {
+        "tir.disable_vectorize": True,
+    }
+    with tvm.transform.PassContext(opt_level=3, config=config):
+        built = tvm.build(
+            sch,
+            list(tensors),
+            name=name,
+            **build_kwargs,
+        )
+    tar_file = f"{dir}.tar"
+    built.export_library(tar_file)
+    shutil.rmtree(dir, ignore_errors=True)
+    with tarfile.open(tar_file) as tf:
+        tf.extractall(dir)
 
 
 class TVMBaseExpr(ABC):
-    def __init__(self, name: str | None = None, target: str | None = None) -> None:
+    def __init__(self, name: str, target: str | None = None) -> None:
         self.name = name
         if target is not None:
             self.target_options = ""
@@ -118,6 +151,17 @@ class TVMBaseExpr(ABC):
             target=self.tgt,
         )
 
+    def emit_c(
+        self,
+        tensors: Sequence[TETensor],
+        sch: te.Schedule,
+        dir: str,
+        func_name: str | None = None,
+    ) -> None:
+        if func_name is None:
+            func_name = self.name
+        tvm_emit_c(sch, tensors, self.tgt, dir, func_name)
+
     def lower(self, tensors: Sequence[TETensor], sch: te.Schedule) -> str:
         return tvm.lower(sch, list(tensors), simple_mode=True)
 
@@ -148,11 +192,12 @@ class TVMOperation(TVMBaseExpr):
         name: str | None = None,
         target: str | None = None,
     ) -> None:
-        super().__init__(name=name, target=target)
         self.args = args
         self.attrs = attrs
         self.operator = operator(args, attrs, name=name)
-        self.name = self.operator.name if name is None else name
+        super().__init__(
+            name=self.operator.name if name is None else name, target=target
+        )
 
     @override
     def generate(self) -> tuple[Any, ...]:

@@ -50,6 +50,7 @@ class TVMCompiler(itf.comp.Compiler):
         self.color = kwargs.get("color", False)
         self.shared_lib = kwargs.get("shared_lib", False)
         self.executable = kwargs.get("executable", False)
+        self.emit_c = kwargs.get("emit_c", False)
         assert not self.executable, f"executable generation not supported yet for TVM"
         assert self.shared_lib, f"shared_lib generation is mandatory for TVM"
 
@@ -94,6 +95,10 @@ class TVMCompiler(itf.comp.Compiler):
             if self.print_transformed_ir:
                 print(lowered, flush=True)
             save_temp(f"{dump_base}.scheduled.txt", lowered)
+        if self.emit_c:
+            op.emit_c(
+                operation, sch, func_name=packed_func_name, dir=f"{lib_path}.export_c"
+            )
         built = op.build(operation, sch, func_name=packed_func_name)
         if self.save_temps:
             for idx, mod in enumerate(built._collect_dso_modules()):
