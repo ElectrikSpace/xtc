@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
 import xtc.itf as itf
 
-DEFAULT_ROOT = "."
-
 __all__ = [
     "MlirNodeScheduler",
     "MlirNodeSchedule",
@@ -42,7 +40,7 @@ class MlirNodeScheduler:
         self.loop_stamps = loop_stamps  # Specification of transformations
         self.dims = dims[:]
         self.splits: dict[str, dict[str, int]] = {}
-        self.tiles = {k: {k: 1} for k in self.dims}
+        self.tiles: dict[str, dict[str, int]] = {k: {} for k in self.dims}
         self.permutation: dict[str, list[str]] = {}
         self.vectorization: list[str] = []
         self.parallelization: list[str] = []
@@ -50,7 +48,8 @@ class MlirNodeScheduler:
 
     def mlir_node_schedule(self) -> MlirNodeSchedule:
         if not self.permutation:
-            self.permutation["."] = self.get_default_interchange()
+            self.permutation["."] = self.get_default_interchange(".")
+
         return MlirNodeSchedule(
             node_name=self.node_name,
             node_ident=self.node_ident,
@@ -68,53 +67,38 @@ class MlirNodeScheduler:
     def __str__(self) -> str:
         return str(self.mlir_node_schedule())
 
-    def loops(self) -> dict[str, int]:
-        loops: dict[str, int] = dict()
+    def get_default_interchange(self, root: str) -> list[str]:
+        ret = [f"{root}/{d}" for d in self.dims.copy()]
         for tile_level in range(len(max(self.tiles.values(), key=len))):
             for _, v in self.tiles.items():
                 if tile_level >= len(v):
                     continue
                 dim_name = list(v.keys())[tile_level]
-                loops[dim_name] = v[dim_name]
-        return loops
-
-    def get_default_interchange(self) -> list[str]:
-        return list(self.loops().keys())
+                ret.append(dim_name)
+        return ret
 
     def split(
         self, dim: str, segments: dict[str, int], root: str = DEFAULT_ROOT
     ) -> None:
-        self.splits[dim] = segments
-        for s in segments:
+        segments_renamed = {f"{root}/{key}": val for key, val in segments.items()}
+        self.splits[dim] = segments_renamed
+        for s in segments_renamed:
             self.tiles[s] = {}
 
     def tile(self, dim: str, tiles: dict[str, int], root: str = DEFAULT_ROOT):
-        tiles_names = []
-        tiles_sizes = []
-        for tile_name, tile_size in tiles.items():
-            tiles_names.append(tile_name)
-            tiles_sizes.append(tile_size)
-        dims = [dim] + tiles_names
-        sizes = tiles_sizes + [1]
-        for d, s in zip(dims, sizes):
-            self.tiles[dim][d] = s
+        for d, s in tiles.items():
+            tile_name = f"{root}/{d}"
+            self.tiles[dim][tile_name] = s
 
     def interchange(self, permutation: list[str], root: str = DEFAULT_ROOT):
-        assert permutation
-        if self.node_name in self.permutation or self.node_name in permutation:
-            root = permutation[0]
-            interchange = permutation[1:]
-        else:
-            root = self.node_name
-            interchange = permutation
-        self.permutation[root] = interchange
+        self.permutation[root] = [f"{root}/{a}" for a in permutation]
 
     def vectorize(self, axes: list[str], root: str = DEFAULT_ROOT):
-        self.vectorization = axes
+        self.vectorization = [f"{root}/{a}" for a in axes]
 
     def parallelize(self, axes: list[str], root: str = DEFAULT_ROOT):
-        self.parallelization = axes
+        self.parallelization = [f"{root}/{a}" for a in axes]
 
     def unroll(self, unrolls: dict[str, int], root: str = DEFAULT_ROOT):
         for dim, ufactor in unrolls.items():
-            self.unrolling[dim] = ufactor
+            self.unrolling[f"{root}/{dim}"] = ufactor
