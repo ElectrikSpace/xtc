@@ -14,8 +14,8 @@ func.func @myfun(
             "J" = {"vectorize"}
       }
     }
-    ins(%A, %B : memref<4x4xf32>, memref<4x4xf32>)
-    outs(%C : memref<4x4xf32>)
+    ins(%A, %B: memref<4x4xf32>, memref<4x4xf32>)
+    outs(%C: memref<4x4xf32>)
   return
 }
 // CHECK:       <myfun>:

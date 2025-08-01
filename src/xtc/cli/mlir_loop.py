@@ -148,6 +148,11 @@ def normalize_schedule(
     for declaration, val in raw_schedule.data.items():
         assert isinstance(declaration, str)
         if ":" in declaration:
+            if not isinstance(val, builtin.DictionaryAttr):
+                raise Exception(
+                    f"The schedule within a split should be a dictionnary or void but got {declaration}"
+                )
+
             assert isinstance(val, builtin.DictionaryAttr)
             inner_schedule = normalize_schedule(val)
             schedule[str(declaration)] = inner_schedule
@@ -162,6 +167,12 @@ def normalize_schedule(
                         annotations[instr] = param.value.data
                     else:
                         raise Exception(f"Annotation parameter should be void or int.")
+
+            elif not isinstance(val, builtin.UnitAttr):
+                raise Exception(
+                    f"Annotation parameter should be a dict or void but got {type(val)}"
+                )
+
             schedule[declaration] = annotations
     return schedule
 
@@ -176,7 +187,7 @@ def build_mlir_node_backend(
     # Dims
     dims = get_string_list_attribute(op, "loop.dims")
     if not dims:
-        raise ValueError("Missing loop.dims attribute")
+        raise Exception("Missing loop.dims attribute")
     op.attributes.pop("loop.dims", None)
     # Additional attributes
     loop_stamps = get_string_list_attribute(op, "loop.add_attributes")

@@ -17,8 +17,8 @@ func.func @myfun(
                   "J#64" = {"vectorize"}
       }
     }
-    ins(%A, %B : memref<256x512xf32>, memref<512x256xf32>)
-    outs(%C : memref<256x256xf32>)
+    ins(%A, %B: memref<256x512xf32>, memref<512x256xf32>)
+    outs(%C: memref<256x256xf32>)
   return
 }
 
