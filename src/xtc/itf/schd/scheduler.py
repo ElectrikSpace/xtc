@@ -69,12 +69,14 @@ class Scheduler(ABC):
     def tile(self, dim: str, tiles: dict[str, int], root: str = DEFAULT_ROOT) -> None:
         """Apply a multi level tiling operation on a dimension.
 
-        The given tile sizes is interpreter outer to inner and
-        each size must divide the dimension size. After this
-        transformation, the number of axis for the given initial
+        The given tile sizes is interpreter outer to inner.
+        After this transformation, the number of axis for the given initial
         dimension is `1 + len(tiles)` where the first axis inherits
         the name of the dimension, and the remaining axis names are
         given by the given tiles keys.
+        Each tile size must be greater or equal to the inner tile sizes.
+        Some backend may not support non-divisible tile sizes, in which
+        case an assertion is raised.
 
         Args:
             dim: name of the dimension to tile
@@ -101,7 +103,7 @@ class Scheduler(ABC):
     def vectorize(self, axes: list[str], root: str = DEFAULT_ROOT) -> None:
         """Apply vectorizations on the given axes names.
 
-        The axes names must given must all be inner axis, full
+        The axes names given must all be inner axes and parallel axes, full
         unrolling and vectorization of all given axes is implied.
 
         Args:
@@ -114,7 +116,7 @@ class Scheduler(ABC):
     def parallelize(self, axes: list[str], root: str = DEFAULT_ROOT) -> None:
         """Apply parallelization on the given axes names.
 
-        The axes names must given must all be outer axis.
+        The axes names must given must all be outer axes and parallel axes.
 
         Args:
             axes: axes names to parallelize
@@ -127,7 +129,7 @@ class Scheduler(ABC):
         """Apply unrolling on the given axes names.
 
         Each given axes name is unrolled with the specified unroll
-        factor.
+        factor. The unroll factors must be greater or equal to 1.
 
         Args:
             unrolls: dict of axes names and unroll factor

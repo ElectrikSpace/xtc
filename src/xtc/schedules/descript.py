@@ -30,13 +30,14 @@ class Descript:
         self._check_flattened_schedule(flat_schedules)
         for schedule in flat_schedules:
             root = schedule["root"]
-            self.scheduler.interchange(schedule["interchange"], root=root)
+
             for d, s in schedule["splits"].items():
                 self.scheduler.split(d, s, root=root)
 
             for d, s in schedule["tiles"].items():
                 self.scheduler.tile(d, s, root=root)
 
+            self.scheduler.interchange(schedule["interchange"], root=root)
             self.scheduler.vectorize(schedule["vectorize"], root=root)
             self.scheduler.parallelize(schedule["parallelize"], root=root)
             self.scheduler.unroll(schedule["unroll"], root=root)
