@@ -68,7 +68,9 @@ class JIRSchedulerAdaptor:
     def tile(self, axis: str, tiles: dict[str, int], root: str = DEFAULT_ROOT) -> None:
         parent_size = self.dims[axis]
         for size in tiles.values():
-            assert parent_size % size == 0
+            assert parent_size % size == 0, (
+                "this backend does not support non-divisible tiles sizes"
+            )
             parent_size = size
         self.tiles[axis] = {
             axis: self.dims[axis],

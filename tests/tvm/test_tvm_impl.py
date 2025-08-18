@@ -25,7 +25,7 @@ def sched_tile2p(sch):
     sch.tile("i", {"i1": 64, "i2": 4})
     sch.tile("j", {"j1": 64, "j2": 64})
     sch.tile("k", {"k1": 13})
-    sch.interchange(["i", "i1"])
+    sch.interchange(["i", "i1", "j", "k", "j1", "k1", "i2", "j2"])
     sch.parallelize(["i", "i1"])
     sch.unroll({"j2": 64, "k1": 13, "i2": 4})
     sch.vectorize(["j2"])
@@ -59,6 +59,7 @@ def sched_tile3wc(sch):
 
 def check_self_sched(impl, sch):
     schedule_str = sch.get_schedule_str()
+    print(f"Schedule str: {schedule_str}")
     sch2 = impl.get_scheduler()
     exec(schedule_str, {"sch": sch2}, {})
     schedule_str2 = sch2.get_schedule_str()

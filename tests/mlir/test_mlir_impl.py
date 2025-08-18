@@ -24,13 +24,13 @@ def sched_tile2p(sch):
     sch.tile("i", {"i1": 64, "i2": 4})
     sch.tile("j", {"j1": 64, "j2": 64})
     sch.tile("k", {"k1": 13})
-    sch.interchange(["i", "i1"])
+    sch.interchange(["i", "i1", "j", "k", "j1", "k1", "i2", "j2"])
     sch.parallelize(["i", "i1"])
     sch.unroll({"j2": 64, "k1": 13, "i2": 4})
     sch.vectorize(["j2"])
     # Expected in MLIR schedule
     return [
-        "permutation={'.': ['./i', './i1']}",
+        "permutation={'.': ['./i', './i1', './j', './k', './j1', './k1', './i2', './j2']}",
         "unrolling={'./j2': 64, './k1': 13, './i2': 4}",
         "vectorization=['./j2']",
         "parallelization=['./i', './i1']",

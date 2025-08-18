@@ -33,7 +33,7 @@ class TVMScheduler(itf.schd.Scheduler):
         self.tiles: dict[str, dict[str, int]] = {
             k: {k: v} for k, v in self.dims.items()
         }
-        self.permutation: list[str] = []
+        self.permutation: list[str] = list(self.tiles.keys())
         self.vectorization: list[str] = []
         self.parallelization: list[str] = []
         self.unrolling: dict[str, int] = {}
@@ -67,11 +67,7 @@ class TVMScheduler(itf.schd.Scheduler):
                     parallels.append(dim_name)
         self._working_dims = loops
         self._working_parallel_dims = parallels
-        self._working_permutation = list(self._working_dims.keys())
-        self._parallel_axes = [k for k in self.dims.keys() if k in self.parallel_dims]
-        self._reduction_axes = [
-            k for k in self.dims.keys() if k not in self.parallel_dims
-        ]
+        self.permutation = list(self._working_dims.keys())
 
     @override
     def split(
@@ -80,24 +76,23 @@ class TVMScheduler(itf.schd.Scheduler):
 
     @override
     def tile(self, dim: str, tiles: dict[str, int], root: str = DEFAULT_ROOT) -> None:
-        ndims = list(tiles.keys())
-        tiles_sizes = list(tiles.values())
-
-        assert len(ndims) == len(tiles_sizes)
-
-        previous_tile_size = self.dims[dim]
-        for ts in tiles_sizes:
-            assert previous_tile_size % ts == 0
-            previous_tile_size = ts
-
-        dims = [dim] + ndims
-        sizes = [self.dims[dim]] + tiles_sizes
-        for d, s in zip(dims, sizes):
-            self.tiles[dim][d] = s
+        all_tiles = {dim: self.dims[dim], **tiles}
+        parent_tile_size = self.dims[dim]
+        for name, size in all_tiles.items():
+            assert size >= 1, f"unexpected tile size < 1 for axis {dim}"
+            assert parent_tile_size >= size, (
+                f"unexpected tile size < inner tile for axis {dim}"
+            )
+            self.tiles[dim][name] = size
+            parent_tile_size = size
         self._update_loops()
 
     @override
     def interchange(self, permutation: list[str], root: str = DEFAULT_ROOT) -> None:
+        for axis in self.permutation:
+            assert axis in permutation, f"missing axis {axis} in interchange"
+        for axis in permutation:
+            assert axis in self.permutation, f"unexpected axis {axis} in interchange"
         self.permutation = permutation
 
     @override
@@ -109,34 +104,57 @@ class TVMScheduler(itf.schd.Scheduler):
 
     @override
     def vectorize(self, axes: list[str], root: str = DEFAULT_ROOT) -> None:
-        for p in axes:
-            assert p in self._working_parallel_dims
+        for axis in axes:
+            assert axis in self._working_parallel_dims, f"non parallel axis {axis}"
         self.vectorization = axes
 
     @override
     def parallelize(self, axes: list[str], root: str = DEFAULT_ROOT) -> None:
-        for p in axes:
-            assert p in self._working_parallel_dims
+        for axis in axes:
+            assert axis in self._working_parallel_dims, f"non parallel axis {axis}"
         self.parallelization = axes
 
     @override
     def unroll(self, unrolls: dict[str, int], root: str = DEFAULT_ROOT) -> None:
+        for axis, unroll in unrolls.items():
+            assert unroll > 0, f"unroll < 1 not supported for axis {axis}"
         self.unrolling = unrolls
 
     def _full_order(self) -> list[str]:
-        permutation = self.permutation + self._working_permutation
-        permutation = list(dict.fromkeys(permutation))
-        return permutation
+        tiles_sizes = self._working_dims
+        permutation = self.permutation
+        unrolling = self.unrolling
+        permutation_with_unrolls = []
+        for axis in permutation:
+            permutation_with_unrolls.append(axis)
+            if axis in unrolling:
+                if unrolling[axis] < tiles_sizes[axis]:
+                    permutation_with_unrolls.append(f"__u_{axis}")
+        return permutation_with_unrolls
+
+    def _full_tiles(self) -> dict[str, dict[str, int]]:
+        unrolling = self.unrolling
+        tiles_with_unroll = {}
+        for dim, dim_tiles in self.tiles.items():
+            dim_tiles_with_unroll = {}
+            for axis, size in dim_tiles.items():
+                dim_tiles_with_unroll.update({axis: size})
+                if axis in unrolling:
+                    if unrolling[axis] < size:
+                        dim_tiles_with_unroll.update({f"__u_{axis}": unrolling[axis]})
+            tiles_with_unroll[dim] = dim_tiles_with_unroll
+        return tiles_with_unroll
 
     def _full_tilings(self) -> dict[str, tuple[str, str, int]]:
         order = self._full_order()
+        tiles = self._full_tiles()
         tilings = {}
-        for dim, tiles in self.tiles.items():
-            t_axes = [dim] + list(tiles.keys())
-            t_sizes = list(tiles.values())
-            tilings[dim] = (dim, "", self.dims[dim])
-            for idx in range(1, len(tiles)):
-                tilings[t_axes[idx + 1]] = (dim, t_axes[idx], t_sizes[idx])
+        for dim, dim_tiles in tiles.items():
+            t_axes = list(dim_tiles.keys())
+            t_sizes = list(dim_tiles.values())
+            tilings[dim] = (dim, "", t_sizes[0])
+            for idx in range(1, len(dim_tiles)):
+                tilings[t_axes[idx]] = (dim, t_axes[idx - 1], t_sizes[idx])
         tilings = {axis: tilings[axis] for axis in order}
         return tilings
 
@@ -148,7 +166,6 @@ class TVMScheduler(itf.schd.Scheduler):
             for axis, (dim, parent, factor) in tilings.items()
         }
         tiles_axis = list(tilings)
-        tiles = list(tilings.items())
         tile_idx = tiles_axis.index(axis)
         outer_tiles = dict(list(tilings.items())[: tile_idx + 1])
         inner_tiles = dict(list(tilings.items())[tile_idx + 1 :])
@@ -170,7 +187,6 @@ class TVMScheduler(itf.schd.Scheduler):
         reorder_idx = {axis: idx for idx, axis in enumerate(tilings)}
         write_axis = sorted(self.write_caches, key=lambda axis: reorder_idx[axis])
         buffer_tilings = {}
-        last_idx = 0
         out = ("O", "", "")
         tiling = tilings
         for idx, axis in enumerate(write_axis):
@@ -182,11 +198,11 @@ class TVMScheduler(itf.schd.Scheduler):
         return buffer_tilings
 
     def _emit_assign_axis(self, sch: str, tens: str, outf: TextIO) -> None:
-        if self._parallel_axes:
-            print(f"{', '.join(self._parallel_axes)}, = {tens}.op.axis", file=outf)
-        if self._reduction_axes:
+        if self.parallel_dims:
+            print(f"{', '.join(self.parallel_dims)}, = {tens}.op.axis", file=outf)
+        if self.reduction_dims:
             print(
-                f"{', '.join(self._reduction_axes)}, = {tens}.op.reduce_axis", file=outf
+                f"{', '.join(self.reduction_dims)}, = {tens}.op.reduce_axis", file=outf
             )
 
     def _emit_assign_tilings(
@@ -222,8 +238,10 @@ class TVMScheduler(itf.schd.Scheduler):
             self._emit_assign_axis(sch, tens, outf)
             self._emit_assign_tilings(sch, tens, tiles, outf)
             for axis, unroll in self.unrolling.items():
-                if axis in tiles:
-                    print(f"{sch}[{tens}].unroll({axis})", file=outf)
+                for u_axis in [f"__u_{axis}", axis]:
+                    if u_axis in tiles:
+                        print(f"{sch}[{tens}].unroll({u_axis})", file=outf)
+                        break
             for axis in self.vectorization:
                 if axis in tiles:
                     print(f"{sch}[{tens}].vectorize({axis})", file=outf)
