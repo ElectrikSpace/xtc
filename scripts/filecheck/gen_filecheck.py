@@ -2,11 +2,13 @@
 
 import subprocess
 import re
+import os
+import sys
 
 INDENT = 7
 
 
-def process_file(file_path: str, in_place: bool, regexp: bool):
+def process_file(file_path: str, in_place: bool, regexp: bool, diff: bool):
     with open(file_path, "r") as file:
         lines = file.readlines()
 
@@ -40,7 +42,7 @@ def process_file(file_path: str, in_place: bool, regexp: bool):
     for line in output_lines[1:]:
         processed_output += f"{prefix} CHECK-NEXT:" + (INDENT - 5) * " " + line + "\n"
 
-    if in_place:
+    if in_place or diff:
         # Remove lines starting with '... CHECK:' or '... CHECK-NEXT:'
         new_lines = [
             line
@@ -52,8 +54,20 @@ def process_file(file_path: str, in_place: bool, regexp: bool):
         ]
         new_lines.append(processed_output)
 
-        with open(file_path, "w") as file:
+        tmp_file = f"{file_path}.tmp"
+        with open(tmp_file, "w") as file:
             file.writelines(new_lines)
+        if diff:
+            try:
+                subprocess.run(
+                    f"diff -u {file_path} {tmp_file}", shell=True, check=True
+                )
+            except subprocess.CalledProcessError as e:
+                print(f"ERROR: output differs for: {file_path}", file=sys.stderr)
+            finally:
+                os.remove(tmp_file)
+        else:
+            os.rename(tmp_file, file_path)
     else:
         print(processed_output)
 
@@ -67,11 +81,20 @@ if __name__ == "__main__":
     )
     parser.add_argument("src", type=str, help="Source file.")
     parser.add_argument(
-        "-i", action="store_true", help="Insert the resulting Filecheck directives."
+        "-i",
+        "--in-place",
+        action="store_true",
+        help="Insert the resulting Filecheck directives.",
     )
     parser.add_argument(
-        "-r", action="store_true", help="Replace MLIR/LLVM variables by regexps."
+        "-r",
+        "--regexp",
+        action="store_true",
+        help="Replace MLIR/LLVM variables by regexps (ignored).",
+    )
+    parser.add_argument(
+        "-d", "--diff", action="store_true", help="Output diff instead of generating."
     )
     args = parser.parse_args()
 
-    process_file(args.src, args.i, args.r)
+    process_file(args.src, args.in_place, args.regexp, args.diff)
