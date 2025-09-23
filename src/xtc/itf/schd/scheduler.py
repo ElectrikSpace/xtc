@@ -47,6 +47,20 @@ class Scheduler(ABC):
         ...
 
     @abstractmethod
+    def set_dims(self, dims: list[str]) -> None:
+        """Redefines dimensions names.
+
+        Use provided abstract dimensions names for the scheduler
+        transformantions instead of the default operation dimensions names.
+
+        This should be set before applying the transformations
+
+        Args:
+            dims: list of dimensions names
+        """
+        ...
+
+    @abstractmethod
     def split(
         self, dim: str, segments: dict[str, int], root: str = DEFAULT_ROOT
     ) -> None:

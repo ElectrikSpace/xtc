@@ -20,14 +20,14 @@ impl = Backend(graph, always_vectorize=False, no_alias=True)
 sch = impl.get_scheduler()
 descript_scheduler(
     scheduler = sch,
-    node_name = "C_reduce",
-    abstract_axis = ["i","j","k"],
+    node_name = "C",
+    abstract_axis = ["I","J","K"],
     spec = {
-        "k": {},
-        "i": {},
-        "j": {},
-        "i#2": {"unroll": None},
-        "j#16": {"vectorize": None},
+        "K": {},
+        "I": {},
+        "J": {},
+        "I#2": {"unroll": None},
+        "J#16": {"vectorize": None},
     }
 )
 
@@ -71,13 +71,13 @@ print(f"CODE: {res}")
 # CHECK-NEXT:                  _1_1 = T.Buffer((16384,), data=_1.data)
 # CHECK-NEXT:                  C_1[cse_var_1] = C_1[cse_var_1] + _0_1[i * 512 + k] * _1_1[k * 32 + j]
 # CHECK-NEXT:  O = obj['C']
-# CHECK-NEXT:  i, j, = O.op.axis
-# CHECK-NEXT:  k, = O.op.reduce_axis
-# CHECK-NEXT:  i, i0 = sch[O].split(i, factor=2)
-# CHECK-NEXT:  j, j0 = sch[O].split(j, factor=16)
-# CHECK-NEXT:  sch[O].reorder(k, i, j, i0, j0)
-# CHECK-NEXT:  sch[O].unroll(i0)
-# CHECK-NEXT:  sch[O].vectorize(j0)
+# CHECK-NEXT:  I, J, = O.op.axis
+# CHECK-NEXT:  K, = O.op.reduce_axis
+# CHECK-NEXT:  I, I0 = sch[O].split(I, factor=2)
+# CHECK-NEXT:  J, J0 = sch[O].split(J, factor=16)
+# CHECK-NEXT:  sch[O].reorder(K, I, J, I0, J0)
+# CHECK-NEXT:  sch[O].unroll(I0)
+# CHECK-NEXT:  sch[O].vectorize(J0)
 # CHECK-NEXT:  
 # CHECK-NEXT:  # from tvm.script import ir as I
 # CHECK-NEXT:  # from tvm.script import tir as T

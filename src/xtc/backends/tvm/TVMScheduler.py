@@ -38,11 +38,11 @@ class TVMScheduler(itf.schd.Scheduler):
                 v for k, v in self._scheduled_ops.items() if k == default_node
             ]
         self._op = candidate_ops[-1]
-        self.dims = self._op.operator.dims_sizes()
-        self.parallel_dims = self._op.operator.dims("P")
-        self.reduction_dims = self._op.operator.dims("R")
+        self._abstract_dims = {d: d for d in self._op.operator.dims()}
+        self._sizes = list(self._op.operator.dims_sizes().values())
+        self.dims = list(self._op.operator.dims())
         self.tiles: dict[str, dict[str, int]] = {
-            k: {k: v} for k, v in self.dims.items()
+            k: {k: v} for k, v in zip(self.dims, self._sizes)
         }
         self.permutation: list[str] = list(self.tiles.keys())
         self.vectorization: list[str] = []
@@ -51,6 +51,18 @@ class TVMScheduler(itf.schd.Scheduler):
         self.write_caches: list[str] = []
         self.read_buffers: list[tuple[str, int, bool]] = []
         self._update_loops()
+
+    @property
+    def dims_sizes(self) -> dict[str, int]:
+        return {d: s for d, s in zip(self.dims, self._sizes)}
+
+    @property
+    def parallel_dims(self) -> list[str]:
+        return [self._abstract_dims[d] for d in self._op.operator.dims("P")]
+
+    @property
+    def reduction_dims(self) -> list[str]:
+        return [self._abstract_dims[d] for d in self._op.operator.dims("R")]
 
     @property
     @override
@@ -82,14 +94,22 @@ class TVMScheduler(itf.schd.Scheduler):
         self.permutation = list(self._working_dims.keys())
 
     @override
+    def set_dims(self, dims: list[str]) -> None:
+        assert len(dims) == len(self.dims)
+        self.dims = dims[:]
+        self._abstract_dims = {d: a for d, a in zip(self._op.operator.dims(), dims)}
+        self.tiles = {k: {k: v} for k, v in zip(self.dims, self._sizes)}
+        self.permutation = list(self.tiles.keys())
+
+    @override
     def split(
         self, dim: str, segments: dict[str, int], root: str = DEFAULT_ROOT
     ) -> None: ...
 
     @override
     def tile(self, dim: str, tiles: dict[str, int], root: str = DEFAULT_ROOT) -> None:
-        all_tiles = {dim: self.dims[dim], **tiles}
-        parent_tile_size = self.dims[dim]
+        all_tiles = {dim: self.dims_sizes[dim], **tiles}
+        parent_tile_size = self.dims_sizes[dim]
         for name, size in all_tiles.items():
             assert size >= 1, f"unexpected tile size < 1 for axis {dim}"
             assert parent_tile_size >= size, (

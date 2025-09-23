@@ -137,10 +137,23 @@ class JIRCompiler(itf.comp.Compiler):
             self._target_triple,
             self._target_arch,
         )
+
+        if self.print_source_ir:
+            print(self._jir_function_str, flush=True)
+            print(schedule, flush=True)
         save_temp(f"{dump_base}.jir", str(self._jir_function_str))
-        module = self._compile_jir_module(
+
+        transformed_function_op, transform_dims = self._transform_jir_module(
             self._jir_function_op,
             schedule,
+            dump_file=lib_path,
+        )
+        if self.print_transformed_ir:
+            print(transformed_function_op, flush=True)
+
+        module = self._compile_jir_module(
+            transformed_function_op,
+            transform_dims,
             dump_file=lib_path,
         )
         save_temp(f"{dump_base}.polygeist.c", self._op_function_str)
@@ -171,12 +184,12 @@ class JIRCompiler(itf.comp.Compiler):
             graph=self._backend._graph,
         )
 
-    def _compile_jir_module(
+    def _transform_jir_module(
         self,
         jir_function_op: JIRFunction,
         schedule: JIRSchedule,
         dump_file: str,
-    ) -> ModuleOp:
+    ) -> tuple[JIRFunction, dict[str, int]]:
         dump_base = Path(dump_file).name
         save_temp = self._save_temp
 
@@ -189,10 +202,21 @@ class JIRCompiler(itf.comp.Compiler):
             jir_function_op, transform_cmds_str, transform_dims
         )
         save_temp(f"{dump_base}.transformed.jir", str(transformed_function_op))
+        return transformed_function_op, transform_dims
+
+    def _compile_jir_module(
+        self,
+        function_op: JIRFunction,
+        dims: dict[str, int],
+        dump_file: str,
+    ) -> ModuleOp:
+        dump_base = Path(dump_file).name
+        save_temp = self._save_temp
+
         index = JIRFunctionDimensionIndex()
-        ctx = JIRFunctionContext(transformed_function_op)
-        index(transformed_function_op)
-        for dimension, size in transform_dims.items():
+        ctx = JIRFunctionContext(function_op)
+        index(function_op)
+        for dimension, size in dims.items():
             ctx.define_dimension(index.index[dimension], int(size))
         if not ctx.well_defined:
             raise RuntimeError("Some ctx dimensions are missing")

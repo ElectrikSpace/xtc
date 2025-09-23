@@ -20,13 +20,13 @@ sch = impl.get_scheduler()
 descript_scheduler(
     scheduler = sch,
     node_name = "C",
-    abstract_axis = ["i","j","k"],
+    abstract_axis = ["I","J","K"],
     spec = {
-        "k": {},
-        "i": {},
-        "j": {},
-        "i#2": {"unroll": None},
-        "j#16": {"vectorize": None},
+        "K": {},
+        "I": {},
+        "J": {},
+        "I#2": {"unroll": None},
+        "J#16": {"vectorize": None},
     }
 )
 
@@ -64,13 +64,13 @@ print(f"CODE: {res}")
 # CHECK-NEXT:      %1 = transform.get_parent_op %loops {isolated_from_above} : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      %2 = transform.structured.match attributes {__xtc_id_C_} in %arg0 : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_2, %loops_3 = transform.structured.tile_using_for %2 tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-# CHECK-NEXT:      transform.annotate %loops_3 "C/k" : !transform.any_op
+# CHECK-NEXT:      transform.annotate %loops_3 "C/K" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %tiled_linalg_op_2 tile_sizes [2, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-# CHECK-NEXT:      transform.annotate %loops_5 "C/i" : !transform.any_op
+# CHECK-NEXT:      transform.annotate %loops_5 "C/I" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_6, %loops_7 = transform.structured.tile_using_for %tiled_linalg_op_4 tile_sizes [0, 16, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-# CHECK-NEXT:      transform.annotate %loops_7 "C/j" : !transform.any_op
+# CHECK-NEXT:      transform.annotate %loops_7 "C/J" : !transform.any_op
 # CHECK-NEXT:      %tiled_linalg_op_8, %loops_9 = transform.structured.tile_using_for %tiled_linalg_op_6 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-# CHECK-NEXT:      transform.annotate %loops_9 "C/i0" : !transform.any_op
+# CHECK-NEXT:      transform.annotate %loops_9 "C/I0" : !transform.any_op
 # CHECK-NEXT:      transform.include @_vecto failures(suppress) (%tiled_linalg_op_8) : (!transform.any_op) -> ()
 # CHECK-NEXT:      %3 = transform.get_parent_op %loops_3 {isolated_from_above} : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      transform.apply_patterns to %3 {
@@ -81,7 +81,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:        transform.apply_patterns.vector.lower_outerproduct
 # CHECK-NEXT:        transform.apply_patterns.vector.lower_contraction
 # CHECK-NEXT:      } : !transform.any_op
-# CHECK-NEXT:      %4 = transform.structured.match attributes {"C/i0"} in %3 : (!transform.any_op) -> !transform.any_op
+# CHECK-NEXT:      %4 = transform.structured.match attributes {"C/I0"} in %3 : (!transform.any_op) -> !transform.any_op
 # CHECK-NEXT:      transform.loop.unroll %loops_9 {factor = 2 : i64} : !transform.any_op
 # CHECK-NEXT:      transform.yield 
 # CHECK-NEXT:    }
@@ -144,9 +144,9 @@ print(f"CODE: {res}")
 # CHECK-NEXT:            %18 = vector.fma %16, %14, %17 : vector<16xf32>
 # CHECK-NEXT:            %19 = vector.insert %18, %cst [0] : vector<16xf32> into vector<1x16xf32>
 # CHECK-NEXT:            vector.transfer_write %19, %subview_12[%c0, %c0] {in_bounds = [true, true]} : vector<1x16xf32>, memref<1x16xf32, strided<[32, 1], offset: ?>>
-# CHECK-NEXT:          } {"C/j"}
-# CHECK-NEXT:        } {"C/i"}
-# CHECK-NEXT:      } {"C/k"}
+# CHECK-NEXT:          } {"C/J"}
+# CHECK-NEXT:        } {"C/I"}
+# CHECK-NEXT:      } {"C/K"}
 # CHECK-NEXT:      return
 # CHECK-NEXT:    }
 # CHECK-NEXT:  }

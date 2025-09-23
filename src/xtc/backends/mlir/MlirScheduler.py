@@ -95,6 +95,10 @@ class MlirScheduler(itf.schd.Scheduler):
         return MlirSchedule(scheduler=self, nodes_schedules=nodes_schedules)
 
     @override
+    def set_dims(self, dims: list[str]) -> None:
+        self._current_scheduler.set_dims(dims)
+
+    @override
     def split(
         self, dim: str, segments: dict[str, int], root: str = DEFAULT_ROOT
     ) -> None:

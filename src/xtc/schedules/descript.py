@@ -28,6 +28,8 @@ class Descript:
     def apply(self, node_name: str, spec: dict[str, dict]):
         flat_schedules = self._flatten_schedule(root=node_name, spec=spec)
         self._check_flattened_schedule(flat_schedules)
+
+        self.scheduler.set_dims(self.abstract_axis)
         for schedule in flat_schedules:
             root = schedule["root"]
 

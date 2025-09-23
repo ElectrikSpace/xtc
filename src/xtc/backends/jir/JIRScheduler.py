@@ -61,6 +61,11 @@ class JIRSchedulerAdaptor:
         self._working_permutation = list(dict.fromkeys(permutation))
         self._update_axis_maps()
 
+    def set_dims(self, dims: list[str]) -> None:
+        assert len(dims) == len(self.dims)
+        self.dims = {k: v for k, v in zip(dims, self.dims.values())}
+        self.tiles = {k: {k: v} for k, v in self.dims.items()}
+
     def split(
         self, dim: str, segments: dict[str, int], root: str = DEFAULT_ROOT
     ) -> None: ...
@@ -254,6 +259,10 @@ class JIRScheduler(itf.schd.Scheduler):
     @override
     def schedule(self) -> itf.schd.Schedule:
         return JIRSchedule(scheduler=self)
+
+    @override
+    def set_dims(self, dims: list[str]) -> None:
+        self._transformer.set_dims(dims)
 
     @override
     def split(

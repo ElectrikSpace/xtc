@@ -76,6 +76,11 @@ class MlirNodeScheduler:
                 ret.append(dim_name)
         return ret
 
+    def set_dims(self, dims: list[str]) -> None:
+        assert len(dims) == len(self.dims)
+        self.dims = dims[:]
+        self.tiles = {k: {} for k in self.dims}
+
     def split(
         self, dim: str, segments: dict[str, int], root: str = DEFAULT_ROOT
     ) -> None:
