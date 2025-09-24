@@ -11,7 +11,7 @@ def get_library_path(libname: str) -> str:
     libfile = ctypes.util.find_library(libname)
     assert libfile
 
-    result = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True)
+    result = subprocess.run(["/sbin/ldconfig", "-p"], capture_output=True, text=True)
     for line in result.stdout.splitlines():
         if libfile in line:
             match = re.search(r"=>\s+(\S+)", line)
