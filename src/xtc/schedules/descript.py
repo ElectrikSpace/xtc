@@ -26,7 +26,7 @@ class Descript:
     abstract_axis: list[str]
 
     def apply(self, node_name: str, spec: dict[str, dict]):
-        flat_schedules = self._flatten_schedule(root=node_name, spec=spec)
+        flat_schedules = self._flatten_schedule(root=node_name, spec=spec, head=[])
         self._check_flattened_schedule(flat_schedules)
 
         self.scheduler.set_dims(self.abstract_axis)
@@ -45,9 +45,7 @@ class Descript:
             self.scheduler.unroll(schedule["unroll"], root=root)
 
     def _flatten_schedule(
-        self,
-        root: str,
-        spec: dict[str, dict],
+        self, root: str, spec: dict[str, dict], head: list[str]
     ) -> list[SchedDict]:
         recursive_scheds: list[SchedDict] = []
         sched: SchedDict = {
@@ -62,7 +60,7 @@ class Descript:
         # State of the schedule
         sizes: dict[str, int | None] = {}
         previous_cut: dict[str, int | None] = {a: 0 for a in self.abstract_axis}
-        interchange: list[str] = []
+        interchange: list[str] = head
         # Processing the schedule
         for declaration, val in spec.items():
             # Splits
@@ -95,7 +93,7 @@ class Descript:
                 next_schedule = val
                 assert isinstance(next_schedule, dict)
                 inner_scheds = self._flatten_schedule(
-                    spec=next_schedule, root=new_root_name
+                    spec=next_schedule, root=new_root_name, head=[axis_name]
                 )
                 recursive_scheds += inner_scheds
                 continue
@@ -118,6 +116,12 @@ class Descript:
                 interchange.append(loop_name)
 
             elif declaration in self.abstract_axis:
+                if declaration in interchange:
+                    raise Exception(
+                        f"""
+                        Axis {declaration} is scheduled twice (or more).
+                        """
+                    )
                 loop_name = declaration
                 interchange.append(loop_name)
 
@@ -149,13 +153,25 @@ class Descript:
         If one of them fails, it raises an error"""
 
         loop_to_axis: dict[str, str] = dict()
+        axis: set[str] = set()
+        axis_seen: set[str] = set()
         for sched in flat_schedules:
-            node_name = sched["root"]
-
             for key in sched["tiles"]:
+                axis.add(key)
                 for value in sched["tiles"][key]:
                     loop_to_axis[value] = key
                 loop_to_axis[key] = key
+
+            for loop in sched["interchange"]:
+                if loop in axis:
+                    axis_seen.add(loop)
+                elif loop in loop_to_axis and not loop_to_axis[loop] in axis_seen:
+                    raise Exception(
+                        f"""
+                        {loop_to_axis[loop]} is not defined but required
+                        to produce {loop} (by tiling).
+                        """
+                    )
 
             for key in sched["splits"]:
                 for value in sched["splits"][key]:
@@ -318,7 +334,7 @@ class Descript:
         splits = sched["splits"]
 
         self._check_vectorize_inner_tile(sched, loop_to_axis, knowned_vectorized_axis)
-        self._check_tile_size(sched, last_sizes, current_split_size)
+        self._check_tile_size(sched, last_sizes.copy(), current_split_size)
         self._check_axis_usage(sched, loop_to_axis, unused_axis)
 
         sub_split_sizes = []

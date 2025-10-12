@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+import os
 from typing_extensions import override
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from pprint import pformat
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
 
 __all__ = [
@@ -24,6 +26,47 @@ class MlirNodeSchedule:
     vectorization: list[str]
     parallelization: list[str]
     unrolling: dict[str, int]
+
+    def index_of_dim(self, dim: str) -> int:
+        return list(self.dims).index(dim)
+
+    def is_base(self, loop_name: str) -> bool:
+        basename = os.path.basename(loop_name)
+        return basename in self.dims
+
+    def is_tile(self, loop_name: str) -> bool:
+        for tiles in self.tiles.values():
+            for tile in tiles:
+                if loop_name == tile:
+                    return True
+        return False
+
+    def dim_of_loop(self, loop_name: str) -> str:
+        # Base dimension
+        basename = os.path.basename(loop_name)
+        if basename in self.dims:
+            return basename
+        # Tiled dimension
+        for dim, tiles in self.tiles.items():
+            for tile in tiles:
+                if os.path.basename(loop_name) == dim or loop_name == tile:
+                    return dim
+        # Splitted dimension
+        for dim, splits in self.splits.items():
+            for split in splits:
+                if os.path.basename(loop_name) == dim or loop_name == split:
+                    return dim
+        assert False
+
+    def size_of_tile(self, tile_name: str) -> int | None:
+        for tiles in self.tiles.values():
+            if tile_name in tiles:
+                return tiles[tile_name]
+        return None
+
+    @override
+    def __str__(self):
+        return pformat(asdict(self))
 
 
 class MlirNodeScheduler:

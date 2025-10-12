@@ -10,13 +10,11 @@ func.func @myfun(
       loop.dims = ["I","J","K"],
       loop.schedule = {
         "I",
-          "J[:128]" = {
-            "K",
-              "J" = {"vectorize"}
+          "K[:256]" = {
+            "J" = {"vectorize"}
           },
-          "J[128:]" = {
-            "K",
-              "J" = {"vectorize"}
+          "K[256:]" = {
+            "J" = {"vectorize"}
           }
       }
     }
@@ -38,9 +36,9 @@ func.func @myfun(
 // CHECK-NEXT:      %0 = transform.structured.match attributes {__node0__} in %arg0 : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op, %loops = transform.structured.tile_using_for %0 tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 // CHECK-NEXT:      transform.annotate %loops "__node0__/I" : !transform.any_op
-// CHECK-NEXT:      %first, %second = transform.structured.split %tiled_linalg_op after 128  {dimension = 1 : i64} : !transform.any_op
+// CHECK-NEXT:      %first, %second = transform.structured.split %tiled_linalg_op after 256  {dimension = 2 : i64} : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_0, %loops_1 = transform.structured.tile_using_for %first tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_1 "__node0__/J[0]/K" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_1 "__node0__/K[0]/K" : !transform.any_op
 // CHECK-NEXT:      %1 = transform.get_parent_op %loops_1 {isolated_from_above} : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      transform.include @_vecto failures(suppress) (%tiled_linalg_op_0) : (!transform.any_op) -> ()
 // CHECK-NEXT:      transform.apply_patterns to %1 {
@@ -52,7 +50,7 @@ func.func @myfun(
 // CHECK-NEXT:        transform.apply_patterns.vector.lower_contraction
 // CHECK-NEXT:      } : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_2, %loops_3 = transform.structured.tile_using_for %second tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
-// CHECK-NEXT:      transform.annotate %loops_3 "__node0__/J[1]/K" : !transform.any_op
+// CHECK-NEXT:      transform.annotate %loops_3 "__node0__/K[1]/K" : !transform.any_op
 // CHECK-NEXT:      %2 = transform.get_parent_op %loops_3 {isolated_from_above} : (!transform.any_op) -> !transform.any_op
 // CHECK-NEXT:      transform.include @_vecto failures(suppress) (%tiled_linalg_op_2) : (!transform.any_op) -> ()
 // CHECK-NEXT:      transform.apply_patterns to %2 {
