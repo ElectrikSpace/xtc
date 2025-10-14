@@ -483,7 +483,7 @@ def compute_num_repet_reuse(
     # 1B) fp_reuse_loop_lvl = reuse_loop_lvl, except that we stop at a "Seq"
     # (else, the value taken for the footprint is wrong, since we are taking the footprint from several branches)
     fp_reuse_loop_lvl = None
-    for ilvl in range(sat_loop_lvl, reuse_loop_lvl + 1):
+    for ilvl in range(sat_loop_lvl, min(len(scheme), reuse_loop_lvl + 1)):
         current_atom = scheme[ilvl]
         if current_atom.type == AtomType.SEQ:
             # Backtrack right below the SEQ
@@ -491,7 +491,8 @@ def compute_num_repet_reuse(
             break
 
     if fp_reuse_loop_lvl == None:
-        fp_reuse_loop_lvl = reuse_loop_lvl
+        # If reuse goes over the scheme, make it such that the topmost footprint value is used
+        fp_reuse_loop_lvl = min(len(scheme) - 1, reuse_loop_lvl)
 
     # DEBUG
     if _debug_reuse_full_assoc:

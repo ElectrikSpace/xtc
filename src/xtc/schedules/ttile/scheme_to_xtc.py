@@ -44,7 +44,7 @@ from xtc.backends.tvm import TVMBackend as TVMBackend
 
 from xtc.schedules.descript import descript_scheduler
 
-from xtc.utils.cpu import cpu_peak_time
+from xtc.utils.cpu import cpu_peak_cycle, cpu_peak_time
 
 logger = logging.getLogger(__name__)
 
@@ -730,13 +730,17 @@ def build_schedule_from_ttile(
 
 
 # Launch scheme execution & measurement through xdsl-transform script (higher level)
+# - By default, if pmu_counters is "[]", the time (+ the peak_perf) is reported
+# - peak_perf is computed from the first "time" or "clk" counter detected inside "pmu_counters"
+# - l_verbose: (print_source_ir, print_transformed_ir, print_assembly)
 def launch_and_measure_scheme_graph_interf(
     comp: Computation,
     machine: Archi,
     scheme: List[Atom],
     dsizes: dict[str, int],
     backend: str,
-    pmu_counters: list[str] = ["clocks"],
+    pmu_counters: list[str] = [],
+    l_verbose: (int, int, int) = (False, False, False),
 ) -> dict[str, float]:
     # 1) Computation - described as a graph
     dtype = f"float{comp.elem_size * 8}"
@@ -815,46 +819,98 @@ def launch_and_measure_scheme_graph_interf(
 
     with tempfile.TemporaryDirectory() as dir:
         dump_file = str(Path(dir) / f"compiled_file_{backend}")
+
+        # For debugging
+        if l_verbose[0]:
+            compiler_args["print_source_ir"] = True
+        if l_verbose[1]:
+            compiler_args["print_transformed_ir"] = True
+        if l_verbose[2]:
+            compiler_args["print_assembly"] = True
+
         compiler = impl_backend.get_compiler(
             shared_lib=True,
             dump_file=dump_file,
             **compiler_args,
-            # Options for debugging: print_source_ir=True,  print_transformed_ir=True
         )
         module = compiler.compile(sched)
         evaluator = module.get_evaluator(
             validate=True,
+            pmu_counters=pmu_counters,
             **evaluate_args,
-            # pmu_counters=pmu_counters
         )
         results, code, error = evaluator.evaluate()
 
-    assert len(results) == 1
-    time = results[0]
+    # If we did not have any pmu_counters specified, the only returned value is "time"
+    if pmu_counters == []:
+        pmu_counters = ["time"]
 
+    assert len(results) == len(pmu_counters)
     res_measurement = dict()
-    res_measurement["time"] = float(time)
+    for i in range(len(pmu_counters)):
+        res_measurement[pmu_counters[i]] = float(results[i])
 
-    # Get the peak_perf
-    # xdsl_transform got utils.py :: cpu_peak_time(ops: int, dtype: str, threads: int = 1)
-    num_ops = compute_number_ops(comp, dsizes)
-    peak_time = cpu_peak_time(num_ops, dtype)
-    time = res_measurement["time"]
+    # Peak_perf computation:
+    #  - We detect if we have "time" or "cpu_clk_thread_unhalted:thread_p" in res_measurement
+    #    If we have multiple of them, then the first one will be taken as reference
+    #  - Then, we compute the peak_perf from this value (depending if it is time or number of cycles)
+    ltime_cycles_counter_names = ["time", "cpu_clk_thread_unhalted:thread_p"]
+    i_time_ref = -1
+    for i in range(len(pmu_counters)):
+        if pmu_counters[i] in ltime_cycles_counter_names:
+            i_time_ref = i
+            break
 
-    # Compute peak_perf
-    peak_perf = peak_time / time
+    # One of the counter is time or num_cycle => compute the peak_perf from it
+    if i_time_ref >= 0:
+        if pmu_counters[i_time_ref] == "time":  # If the counter is time
+            time = res_measurement[pmu_counters[i_time_ref]]
 
-    logger.debug(
-        "launch_and_measure_scheme_graph: peak_time: %.3f ms, time: %.3f ms, "
-        "num_ops: %d, dtype: %s, "
-        "peak perf: %.2f%%",
-        peak_time * 1000,
-        time * 1000,
-        num_ops,
-        dtype,
-        peak_perf * 100,
-    )
+            # Get the peak_perf
+            # xdsl_transform got utils.py :: cpu_peak_time(ops: int, dtype: str, threads: int = 1)
+            num_ops = compute_number_ops(comp, dsizes)
+            peak_time = cpu_peak_time(num_ops, dtype)
 
-    res_measurement["peak_perf"] = peak_perf
+            # DEBUG
+            # print(f"measurement = {res_measurement['time']}")
+            # print(f"{peak_time=}")
+
+            # Compute peak_perf & commit it
+            peak_perf = peak_time / time
+            res_measurement["peak_perf"] = peak_perf
+
+            # Log for debugging
+            logger.debug(
+                "launch_and_measure_scheme_graph: peak_time: %.3f ms, time: %.3f ms, "
+                "num_ops: %d, dtype: %s, "
+                "peak perf: %.2f%%",
+                peak_time * 1000,
+                time * 1000,
+                num_ops,
+                dtype,
+                peak_perf * 100,
+            )
+
+        elif "clk" in pmu_counters[i_time_ref]:  # If the counter is a num_cycle
+            cycles = res_measurement[pmu_counters[i_time_ref]]
+
+            num_ops = compute_number_ops(comp, dsizes)
+            peak_cycles = cpu_peak_cycle(num_ops, dtype)
+
+            # Compute peak_perf & commit it
+            peak_perf = peak_cycles / cycles
+            res_measurement["peak_perf"] = peak_perf
+
+            # Log for debugging
+            logger.debug(
+                "launch_and_measure_scheme_graph: peak_cycles: %.3f , cycles: %.3f ms, "
+                "num_ops: %d, dtype: %s, "
+                "peak perf: %.2f%%",
+                peak_cycles,
+                cycles * 1000,
+                num_ops,
+                dtype,
+                peak_perf * 100,
+            )
 
     return res_measurement

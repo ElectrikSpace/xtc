@@ -67,6 +67,23 @@ def cpu_info() -> Dict[str, Any]:
     return cpu_info
 
 
+def cpu_peak_cycle(ops: int, dtype: str, threads: int = 1) -> float:
+    """
+    Return the peak number of cycles (minimal number of cycles) for the
+    number of operations given the dtype ("float32", "float64", ...) and
+    the number of threads.
+    From this value, for instance, given an effective execution time
+    for 256x256 ops on float32 with 4 threads,
+    one can compute peak performance ratio as:
+
+        peak_perf = num_cycle /cpu_peak_cycle(256*256, "float32", threads=4)
+
+    """
+    info = cpu_info()
+    cycles = ops / info["ipc"] / info["vsize"][dtype] / threads
+    return cycles
+
+
 def cpu_peak_time(ops: int, dtype: str, threads: int = 1) -> float:
     """
     Return the peak time (minimal time in seconds) for the number of
