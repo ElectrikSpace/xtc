@@ -13,4 +13,5 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
 	outs(%C: memref<256x256xf64>)
 	return
 }
-// CHECK:  i[10:] is defined on an already covered axis. This might be caused by a missing endpoint: i
+// CHECK: i[10:] is defined on an already covered axis.
+// CHECK: This might be caused by a missing endpoint: i

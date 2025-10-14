@@ -6,7 +6,7 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
 		loop.schedule = {
 			"i",
 				"k",
-					"j[:]" = {"j"}
+					"j[:]" = {}
 		}
 	}
 	ins(%A, %B : memref<256x512xf64>, memref<512x256xf64>)

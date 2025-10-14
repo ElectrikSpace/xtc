@@ -16,4 +16,5 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
 	outs(%C: memref<256x256xf64>)
 	return
 }
-// CHECK:  j0 cannot be unrolled 10 times on a tile of size 8
+// CHECK:      j0 cannot be unrolled 10 times
+// CHECK-NEXT: on a tile of size 8

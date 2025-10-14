@@ -7,7 +7,7 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
 			"i",
 				"k",
 					"j[:128]" = {
-						"j" = {"unroll", "invalideAnotation"}},
+						"j#2" = {"unroll", "invalideAnotation"}},
 					"j[:]" = {"unroll"}
 		}
 	}
@@ -16,4 +16,4 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
 	return
 }
 
-// CHECK:  Unknown annotation on j: invalideAnotation
+// CHECK:  Unknown annotation on j0: invalideAnotation

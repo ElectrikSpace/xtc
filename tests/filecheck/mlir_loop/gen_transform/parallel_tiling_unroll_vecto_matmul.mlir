@@ -43,8 +43,8 @@ func.func @myfun(
 // CHECK-NEXT:      transform.annotate %loops_3 "__node0__/I0" : !transform.any_op
 // CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %tiled_linalg_op_2 tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
 // CHECK-NEXT:      transform.annotate %loops_5 "__node0__/K0" : !transform.any_op
-// CHECK-NEXT:      transform.include @_vecto failures(suppress) (%tiled_linalg_op_4) : (!transform.any_op) -> ()
 // CHECK-NEXT:      %1 = transform.get_parent_op %forall_op {isolated_from_above} : (!transform.any_op) -> !transform.any_op
+// CHECK-NEXT:      transform.include @_vecto failures(suppress) (%tiled_linalg_op_4) : (!transform.any_op) -> ()
 // CHECK-NEXT:      transform.apply_patterns to %1 {
 // CHECK-NEXT:        transform.apply_patterns.vector.reduction_to_contract
 // CHECK-NEXT:        transform.apply_patterns.vector.transfer_permutation_patterns

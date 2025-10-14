@@ -3,17 +3,15 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
   linalg.matmul {
     loop.dims = ["i", "j", "k"],
     loop.schedule = {
+      "i",
+        "j#128",
           "k[:128]" = {
-            "i",
-              "j",
-                "k#8",
-                  "j#32" = {"vectorize"}
+            "k#8",
+              "j#32"
           },
           "k[:]" = {
-            "i",
-              "j",
-                "k#8" = {"vectorize"},
-                  "j#32"
+            "k#8",
+              "j#32"
           }
     }
   }
@@ -22,4 +20,5 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
   return
 }
 
-// CHECK:  Inner loop j0 isn't vectorized but an outer one is.
+// CHECK:      j is not defined but required
+// CHECK-NEXT: to produce j0 (by tiling).

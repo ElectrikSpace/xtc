@@ -12,4 +12,5 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
  	 	outs(%C: memref<256x256xf64>)
  	 return
  }
-// CHECK:  Unroll parameter should be strictly positive: "j" = {"unroll" = 0}.
+// CHECK: Unroll parameter should be strictly positive:
+// CHECK: "j" = {"unroll" = 0}.

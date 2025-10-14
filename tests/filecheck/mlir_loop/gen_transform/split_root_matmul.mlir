@@ -10,14 +10,12 @@ func.func @myfun(
       loop.dims = ["I","J","K"],
       loop.schedule = {
         "I[:128]" = {
-          "I",
-            "J",
-              "K"
+          "J",
+            "K"
         },
         "I[128:]" = {
-          "I",
-            "K",
-              "J"
+          "K",
+            "J"
         }
       }
     }

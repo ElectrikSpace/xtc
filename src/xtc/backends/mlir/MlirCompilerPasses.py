@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+from dataclasses import dataclass
 from mlir.dialects import transform
 from mlir.dialects.transform import (
     NamedSequenceOp,
@@ -35,6 +36,42 @@ from .MlirScheduler import MlirSchedule, MlirNodeSchedule
 
 _VECTO_SEQ_NAME = "_vecto"
 _SUPER_VECTORIZE_SEQ_NAME = "_super_vectorize"
+
+
+@dataclass
+class SplitState:
+    # Explicit, flattened split maps
+    all_splits_by_loop: dict[str, int]
+    # loop -> dim
+    loop_dim_by_split: dict[str, str]
+    # For each loop to split, store the next (todo) cutting point
+    prev_split_size: dict[str, int]
+    # For each loop to split, store the previous (done) cutting point
+    next_split_size: dict[str, int]
+
+    def __init__(self, splits: dict[str, dict[str, int]]):
+        self.all_splits_by_loop: dict[str, int] = {
+            loop: cut
+            for sub_splits in splits.values()
+            for loop, cut in sub_splits.items()
+        }
+        self.loop_dim_by_split: dict[str, str] = {
+            loop: dim for dim, splits in splits.items() for loop in splits
+        }
+        self.prev_split_size = {loop: 0 for loop in self.all_splits_by_loop}
+        loops_to_split: list[str] = list(self.all_splits_by_loop)
+        self.next_split_size: dict[str, int] = {
+            loops_to_split[i]: self.all_splits_by_loop[loops_to_split[i + 1]]
+            for i in range(len(loops_to_split) - 1)
+        }
+
+    def chunk_size(self, loop_name: str) -> int:
+        return self.next_split_size[loop_name] - self.prev_split_size[loop_name]
+
+    def move_forward(self, loop_name: str):
+        offset = self.chunk_size(loop_name)
+        self.prev_split_size[loop_name] += offset
+        self.next_split_size[loop_name] += offset
 
 
 class MlirProgramInsertTransformPass:
@@ -134,8 +171,8 @@ class MlirProgramInsertTransformPass:
                 op_attrs={schedule.node_ident: UnitAttr.get()},
             )
             if schedule.permutation:
-                handle = self._generate_node_schedule(
-                    handle, schedule, list(schedule.permutation)[0]
+                handle = self._generate_node_tiling(
+                    handle=handle, schedule=schedule, root=list(schedule.permutation)[0]
                 )
         assert handle, "At least 1 operation should have been processed"
         return handle
@@ -172,101 +209,73 @@ class MlirProgramInsertTransformPass:
                 )
             transform.YieldOp([])
 
-    def _generate_node_schedule(
-        self,
-        handle: OpResult,
-        schedule: MlirNodeSchedule,
-        root: str,
-    ) -> OpResult:
-        permutation = schedule.permutation[root]
-        handle = self._generate_node_tiling(handle, permutation, schedule, root)
-        # Stamp the resulting operation
-        for s in schedule.loop_stamps:
-            transform.AnnotateOp(handle, s)
-
-        return handle
-
     def _generate_node_tiling(
         self,
         handle: OpResult,
-        permutation: list[str],
         schedule: MlirNodeSchedule,
         root: str,
+        state: SplitState | None = None,
     ) -> OpResult:
-        # Produce the sequence of commands needed for the tiling
-        tiling_vectors = self._generate_tiling_vectors(root, schedule, permutation)
-        #
-        all_splits = {
-            key: value
-            for splits in schedule.splits.values()
-            for key, value in splits.items()
-        }
-        previous_scar = {key: 0 for key in all_splits}
-        split_to_dimension = {
-            split: dimension
-            for dimension, splits in schedule.splits.items()
-            for split in splits
-        }
-        split_keys = list(all_splits)
-        scar_of_split = {
-            split_keys[i]: all_splits[split_keys[i + 1]]
-            for i in range(len(split_keys) - 1)
-        }
+        tiles_sizes_by_loops = self._generate_tiling_insns(schedule)
+
+        if state is None:
+            state = SplitState(schedule.splits)
+
         # Materialize loops
         all_loops: dict[str, OpResult] = {}
-        target_op = handle
-        for axis_name in permutation:
+        current_handle = handle
+        permutation = schedule.permutation[root]
+        for loop_name in permutation:
             #
-            if axis_name in scar_of_split:
-                chunk_size = scar_of_split[axis_name] - previous_scar[axis_name]
-                dim_to_split = split_to_dimension[axis_name]
+            if loop_name in state.next_split_size:
+                dim_to_split = state.loop_dim_by_split[loop_name]
                 split_command = structured.SplitOp(
-                    target=target_op,
+                    target=current_handle,
                     dimension=schedule.dims.index(dim_to_split),
-                    chunk_sizes=chunk_size,
+                    chunk_sizes=state.chunk_size(loop_name),
                 )
-                left_loop_op = self._generate_node_schedule(
-                    handle=split_command.results[0], schedule=schedule, root=axis_name
+                left_loop_op = self._generate_node_tiling(
+                    handle=split_command.results[0],
+                    schedule=schedule,
+                    root=loop_name,
+                    state=state,
                 )
-                all_loops[axis_name] = left_loop_op
-                target_op = split_command.results[1]
+                all_loops[loop_name] = left_loop_op
+                current_handle = split_command.results[1]
+                state.move_forward(loop_name)
                 continue
-            # Catch the last chunk of the axis
-            elif axis_name in split_to_dimension and axis_name != root:
-                right_loop_op = self._generate_node_schedule(
-                    handle=target_op, schedule=schedule, root=axis_name
+            # Catch the last chunk of the loop
+            elif loop_name in state.loop_dim_by_split and loop_name != root:
+                right_loop_op = self._generate_node_tiling(
+                    handle=current_handle,
+                    schedule=schedule,
+                    root=loop_name,
+                    state=state,
                 )
-                all_loops[axis_name] = right_loop_op
-                target_op = right_loop_op
+                all_loops[loop_name] = right_loop_op
+                current_handle = right_loop_op
                 continue
 
-            if axis_name in schedule.vectorization:
+            if loop_name in schedule.vectorization:
                 continue
 
             # Generate the tiling itself
-            elif axis_name in tiling_vectors:
-                tiling_vector = tiling_vectors[axis_name]
-                if axis_name in schedule.parallelization:
+            elif loop_name in tiles_sizes_by_loops:
+                tiling_vector = tiles_sizes_by_loops[loop_name]
+                if loop_name in schedule.parallelization:
                     tiling_command = TileUsingForallOp(
-                        target_op, tile_sizes=tiling_vector
+                        current_handle, tile_sizes=tiling_vector
                     )
                 else:
-                    tiling_command = TileUsingForOp(target_op, sizes=tiling_vector)
+                    tiling_command = TileUsingForOp(current_handle, sizes=tiling_vector)
                 # Extract the results
-                target_op = tiling_command.results[0]
+                current_handle = tiling_command.results[0]
                 if len(tiling_command.results) == 2:
                     new_loop = tiling_command.results[-1]
-                    all_loops[axis_name] = new_loop
+                    all_loops[loop_name] = new_loop
                     # Annotate the resulting loop if successfully generated
-                    transform.AnnotateOp(new_loop, axis_name)
+                    transform.AnnotateOp(new_loop, loop_name)
 
-        if set(permutation) & set(schedule.vectorization) and not self._super_vectorize:
-            transform.IncludeOp(
-                results_=[],
-                target=_VECTO_SEQ_NAME,
-                failure_propagation_mode=2,
-                operands_=[target_op],
-            )
         # The resulting operation is either the outermost loop or
         # the initial (not tiled) handle
         if all_loops:
@@ -279,6 +288,18 @@ class MlirProgramInsertTransformPass:
             handle_after_tiling,
             isolated_from_above=True,
         )
+
+        if (
+            set(permutation) & set(schedule.vectorization)
+            and self._vectors_size is None
+        ):
+            transform.IncludeOp(
+                results_=[],
+                target=_VECTO_SEQ_NAME,
+                failure_propagation_mode=2,
+                operands_=[current_handle],
+            )
+
         if schedule.vectorization or self._always_vectorize:
             with InsertionPoint(transform.ApplyPatternsOp(parent_op).patterns):
                 vector.ApplyVectorReductionToContractPatternsOp()
@@ -305,54 +326,46 @@ class MlirProgramInsertTransformPass:
 
         return handle_after_tiling
 
-    def _generate_tiling_vectors(
-        self, root: str, schedule: MlirNodeSchedule, permutation: list[str]
+    def _generate_tiling_insns(
+        self, schedule: MlirNodeSchedule
     ) -> dict[str, list[int]]:
-        tiles = {}
-        for axis, axis_tiles in schedule.tiles.items():
-            tiles_names = [f"{root}/{axis}"] + list(axis_tiles.keys())
-            tiles_sizes = [0] + list(axis_tiles.values())
+        tiles_sizes_by_loops: dict[str, list[int]] = {}
+        state_of_tiling: dict[str, int] = {dim: 1 for dim in schedule.dims}
+        candidate_state_of_tiling = state_of_tiling.copy()
+        previous_root = ""
+        for loc_root, permutation in reversed(schedule.permutation.items()):
+            if len(loc_root) == len(previous_root):
+                # Reset the view on the state of tiling (we are jumping into
+                # a split of the same loop)
+                candidate_state_of_tiling = state_of_tiling.copy()
+            else:
+                # Update the state of tiling
+                state_of_tiling = candidate_state_of_tiling.copy()
 
-            # Shift the list in order to provide a description of the tiling
-            # instructions rather than a description of the (resulting) tiles
-            # to the Transform dialect
-            i = 0
-            while i < len(tiles_sizes):
-                # When zero: shift the list and erase the zero
-                if tiles_sizes[i] == 0:
-                    for j in range(i, len(tiles_sizes) - 1):
-                        tiles_sizes[j] = tiles_sizes[j + 1]
-                    # Put a 1 at the end
-                    tiles_sizes[-1] = 1
-                # When not zero: increment i (next)
-                else:
-                    i += 1
-            #
-            tiles[axis] = dict(zip(tiles_names, tiles_sizes))
+            for loop in reversed(permutation):
+                # The loop needs to be base or tile
+                if not (schedule.is_tile(loop) or schedule.is_base(loop)):
+                    continue
 
-        vector_size = len(schedule.dims)
-        index_of_dim = {d: i for i, d in enumerate(schedule.dims)}
-        # Handle splitted dimensions
-        for dim, splits_of_dim in schedule.splits.items():
-            for s in splits_of_dim:
-                index_of_dim[s] = index_of_dim[dim]
-        # Handle tiled dimensions
-        size_of_tile: dict[str, int] = {}
-        for dim, tiles_of_dim in tiles.items():
-            size_of_tile = size_of_tile | tiles_of_dim
-            for t in tiles_of_dim:
-                index_of_dim[t] = index_of_dim[dim]
-        # Build the tiling vectors
-        tiling_vectors: dict[str, list[int]] = {}
-        for d in permutation:
-            if d in size_of_tile:
-                tiling_vector = [
-                    size_of_tile[d] if i == index_of_dim[d] else 0
-                    for i in range(vector_size)
-                ]
-                tiling_vectors[d] = tiling_vector
+                # Fetch the dimension knowledge
+                dim_of_loop = schedule.dim_of_loop(loop)
+                index_of_dim = schedule.index_of_dim(dim_of_loop)
 
-        return tiling_vectors
+                # Build the strip size
+                size_of_tile = schedule.size_of_tile(loop)
+                strip_size = candidate_state_of_tiling[dim_of_loop]
+                if schedule.is_tile(loop):
+                    assert size_of_tile
+                    candidate_state_of_tiling[dim_of_loop] = size_of_tile
+
+                # Build the tiling instruction vector
+                tiling_vector = [0] * len(schedule.dims)
+                tiling_vector[index_of_dim] = strip_size
+                tiles_sizes_by_loops[loop] = tiling_vector
+
+            previous_root = loc_root
+
+        return tiles_sizes_by_loops
 
 
 class MlirProgramApplyTransformPass:

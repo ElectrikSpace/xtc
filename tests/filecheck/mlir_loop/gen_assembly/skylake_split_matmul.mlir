@@ -12,17 +12,15 @@ func.func @myfun(
       loop.dims = ["I","J","K"],
       loop.schedule = {
         "I[:2]" = {
-          "I",
-            "K",
-              "J"
+          "K",
+            "J"
         },
         "I[2:]" = {
-          "I",
-            "J",
-              "K",
-                "I#1",
-                  "K#8",
-                    "J#64" = {"vectorize"}
+          "J",
+            "K",
+              "I#1",
+                "K#8",
+                  "J#64" = {"vectorize"}
         }
       }
     }
@@ -30,138 +28,49 @@ func.func @myfun(
     outs(%C : memref<258x256xf32>)
   return
 }
-// CHECK:       <myfun>:
-// CHECK-NEXT:  	push   %rbp
-// CHECK-NEXT:  	push   %r15
-// CHECK-NEXT:  	push   %r14
-// CHECK-NEXT:  	push   %r13
-// CHECK-NEXT:  	push   %r12
-// CHECK-NEXT:  	push   %rbx
-// CHECK-NEXT:  	lea    0x100(%rdx),%rax
-// CHECK-NEXT:  	mov    %rax,-0x8(%rsp)
-// CHECK-NEXT:  	lea    0x200(%rdx),%rax
-// CHECK-NEXT:  	mov    %rax,-0x10(%rsp)
-// CHECK-NEXT:  	lea    0x300(%rdx),%rax
-// CHECK-NEXT:  	mov    %rax,-0x18(%rsp)
-// CHECK-NEXT:  	lea    0x1c00(%rsi),%rax
-// CHECK-NEXT:  	mov    %rax,-0x20(%rsp)
-// CHECK-NEXT:  	lea    0x1d00(%rsi),%rax
-// CHECK-NEXT:  	mov    %rax,-0x28(%rsp)
-// CHECK-NEXT:  	lea    0x1e00(%rsi),%rax
-// CHECK-NEXT:  	mov    %rax,-0x30(%rsp)
-// CHECK-NEXT:  	mov    %rsi,-0x38(%rsp)
-// CHECK-NEXT:  	add    $0x1f00,%rsi
-// CHECK-NEXT:  	mov    $0x1,%bpl
-// CHECK-NEXT:  	xor    %r14d,%r14d
-// CHECK-NEXT:  	{{.*}}nop{{.*}}
-// CHECK-NEXT:  	mov    %r14,%r15
-// CHECK-NEXT:  	shl    $0xb,%r15
-// CHECK-NEXT:  	add    %rdi,%r15
-// CHECK-NEXT:  	shl    $0xa,%r14
-// CHECK-NEXT:  	mov    %rdx,%rcx
-// CHECK-NEXT:  	lea    (%rdx,%r14,1),%r12
-// CHECK-NEXT:  	mov    -0x8(%rsp),%rax
-// CHECK-NEXT:  	lea    (%rax,%r14,1),%r13
-// CHECK-NEXT:  	mov    -0x10(%rsp),%rax
-// CHECK-NEXT:  	add    %r14,%rax
-// CHECK-NEXT:  	add    -0x18(%rsp),%r14
-// CHECK-NEXT:  	mov    %rsi,%rbx
-// CHECK-NEXT:  	mov    -0x30(%rsp),%r11
-// CHECK-NEXT:  	mov    -0x28(%rsp),%r10
-// CHECK-NEXT:  	mov    -0x20(%rsp),%r9
-// CHECK-NEXT:  	xor    %edx,%edx
-// CHECK-NEXT:  	nop
-// CHECK-NEXT:  	vmovss (%r15,%rdx,4),%xmm0
-// CHECK-NEXT:  	vmovss 0x4(%r15,%rdx,4),%xmm1
-// CHECK-NEXT:  	vmovss 0x8(%r15,%rdx,4),%xmm2
-// CHECK-NEXT:  	vmovss 0xc(%r15,%rdx,4),%xmm3
-// CHECK-NEXT:  	vmovss 0x10(%r15,%rdx,4),%xmm4
-// CHECK-NEXT:  	vmovss 0x14(%r15,%rdx,4),%xmm5
-// CHECK-NEXT:  	vmovss 0x18(%r15,%rdx,4),%xmm6
-// CHECK-NEXT:  	vmovss 0x1c(%r15,%rdx,4),%xmm7
+// CHECK:     <myfun>:
+// CHECK-NEXT:  	xor    %ecx,%ecx
+// CHECK-NEXT:  	mov    %rsi,%rax
+// CHECK-NEXT:  	data16 cs nopw 0x0(%rax,%rax,1)
+// CHECK-NEXT:  	vmovss (%rdi,%rcx,4),%xmm0
 // CHECK-NEXT:  	mov    $0xffffffffffffffff,%r8
-// CHECK-NEXT:  	xchg   %ax,%ax
-// CHECK-NEXT:  	vmovss -0x1bfc(%r9,%r8,4),%xmm8
-// CHECK-NEXT:  	vfmadd213ss 0x4(%r12,%r8,4),%xmm0,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x17fc(%r9,%r8,4),%xmm1,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x13fc(%r9,%r8,4),%xmm2,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0xffc(%r9,%r8,4),%xmm3,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0xbfc(%r9,%r8,4),%xmm4,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x7fc(%r9,%r8,4),%xmm5,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x3fc(%r9,%r8,4),%xmm6,%xmm8
-// CHECK-NEXT:  	vfmadd231ss 0x4(%r9,%r8,4),%xmm7,%xmm8
-// CHECK-NEXT:  	vmovss %xmm8,0x4(%r12,%r8,4)
+// CHECK-NEXT:  	nopl   0x0(%rax)
+// CHECK-NEXT:  	vmovss 0x4(%rax,%r8,4),%xmm1
+// CHECK-NEXT:  	vfmadd213ss 0x4(%rdx,%r8,4),%xmm0,%xmm1
+// CHECK-NEXT:  	vmovss %xmm1,0x4(%rdx,%r8,4)
 // CHECK-NEXT:  	inc    %r8
-// CHECK-NEXT:  	cmp    $0x3f,%r8
-// CHECK-NEXT:  	jb     <myfun+0xf0>
+// CHECK-NEXT:  	cmp    $0xff,%r8
+// CHECK-NEXT:  	jb     <myfun+0x20>
+// CHECK-NEXT:  	lea    0x1(%rcx),%r8
+// CHECK-NEXT:  	add    $0x400,%rax
+// CHECK-NEXT:  	cmp    $0x1ff,%rcx
+// CHECK-NEXT:  	mov    %r8,%rcx
+// CHECK-NEXT:  	jb     <myfun+0x10>
+// CHECK-NEXT:  	xor    %ecx,%ecx
+// CHECK-NEXT:  	mov    %rsi,%rax
+// CHECK-NEXT:  	nopl   0x0(%rax)
+// CHECK-NEXT:  	vmovss 0x800(%rdi,%rcx,4),%xmm0
 // CHECK-NEXT:  	mov    $0xffffffffffffffff,%r8
-// CHECK-NEXT:  	nopl   0x0(%rax,%rax,1)
-// CHECK-NEXT:  	vmovss -0x1bfc(%r10,%r8,4),%xmm8
-// CHECK-NEXT:  	vfmadd213ss 0x4(%r13,%r8,4),%xmm0,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x17fc(%r10,%r8,4),%xmm1,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x13fc(%r10,%r8,4),%xmm2,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0xffc(%r10,%r8,4),%xmm3,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0xbfc(%r10,%r8,4),%xmm4,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x7fc(%r10,%r8,4),%xmm5,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x3fc(%r10,%r8,4),%xmm6,%xmm8
-// CHECK-NEXT:  	vfmadd231ss 0x4(%r10,%r8,4),%xmm7,%xmm8
-// CHECK-NEXT:  	vmovss %xmm8,0x4(%r13,%r8,4)
+// CHECK-NEXT:  	vmovss 0x4(%rax,%r8,4),%xmm1
+// CHECK-NEXT:  	vfmadd213ss 0x404(%rdx,%r8,4),%xmm0,%xmm1
+// CHECK-NEXT:  	vmovss %xmm1,0x404(%rdx,%r8,4)
 // CHECK-NEXT:  	inc    %r8
-// CHECK-NEXT:  	cmp    $0x3f,%r8
-// CHECK-NEXT:  	jb     <myfun+0x160>
-// CHECK-NEXT:  	mov    $0xffffffffffffffff,%r8
-// CHECK-NEXT:  	nopl   0x0(%rax,%rax,1)
-// CHECK-NEXT:  	vmovss -0x1bfc(%r11,%r8,4),%xmm8
-// CHECK-NEXT:  	vfmadd213ss 0x4(%rax,%r8,4),%xmm0,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x17fc(%r11,%r8,4),%xmm1,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x13fc(%r11,%r8,4),%xmm2,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0xffc(%r11,%r8,4),%xmm3,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0xbfc(%r11,%r8,4),%xmm4,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x7fc(%r11,%r8,4),%xmm5,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x3fc(%r11,%r8,4),%xmm6,%xmm8
-// CHECK-NEXT:  	vfmadd231ss 0x4(%r11,%r8,4),%xmm7,%xmm8
-// CHECK-NEXT:  	vmovss %xmm8,0x4(%rax,%r8,4)
-// CHECK-NEXT:  	inc    %r8
-// CHECK-NEXT:  	cmp    $0x3f,%r8
-// CHECK-NEXT:  	jb     <myfun+0x1d0>
-// CHECK-NEXT:  	mov    $0xffffffffffffffff,%r8
-// CHECK-NEXT:  	nopl   0x0(%rax,%rax,1)
-// CHECK-NEXT:  	vmovss -0x1bfc(%rbx,%r8,4),%xmm8
-// CHECK-NEXT:  	vfmadd213ss 0x4(%r14,%r8,4),%xmm0,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x17fc(%rbx,%r8,4),%xmm1,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x13fc(%rbx,%r8,4),%xmm2,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0xffc(%rbx,%r8,4),%xmm3,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0xbfc(%rbx,%r8,4),%xmm4,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x7fc(%rbx,%r8,4),%xmm5,%xmm8
-// CHECK-NEXT:  	vfmadd231ss -0x3fc(%rbx,%r8,4),%xmm6,%xmm8
-// CHECK-NEXT:  	vfmadd231ss 0x4(%rbx,%r8,4),%xmm7,%xmm8
-// CHECK-NEXT:  	vmovss %xmm8,0x4(%r14,%r8,4)
-// CHECK-NEXT:  	inc    %r8
-// CHECK-NEXT:  	cmp    $0x3f,%r8
-// CHECK-NEXT:  	jb     <myfun+0x240>
-// CHECK-NEXT:  	lea    0x8(%rdx),%r8
-// CHECK-NEXT:  	add    $0x2000,%r9
-// CHECK-NEXT:  	add    $0x2000,%r10
-// CHECK-NEXT:  	add    $0x2000,%r11
-// CHECK-NEXT:  	add    $0x2000,%rbx
-// CHECK-NEXT:  	cmp    $0x1f8,%rdx
-// CHECK-NEXT:  	mov    %r8,%rdx
-// CHECK-NEXT:  	jb     <myfun+0xb0>
-// CHECK-NEXT:  	mov    $0x1,%r14d
-// CHECK-NEXT:  	test   $0x1,%bpl
-// CHECK-NEXT:  	mov    $0x0,%ebp
-// CHECK-NEXT:  	mov    %rcx,%rdx
-// CHECK-NEXT:  	jne    <myfun+0x70>
+// CHECK-NEXT:  	cmp    $0xff,%r8
+// CHECK-NEXT:  	jb     <myfun+0x70>
+// CHECK-NEXT:  	lea    0x1(%rcx),%r8
+// CHECK-NEXT:  	add    $0x400,%rax
+// CHECK-NEXT:  	cmp    $0x1ff,%rcx
+// CHECK-NEXT:  	mov    %r8,%rcx
+// CHECK-NEXT:  	jb     <myfun+0x60>
 // CHECK-NEXT:  	add    $0x800,%rdx
 // CHECK-NEXT:  	add    $0x101c,%rdi
-// CHECK-NEXT:  	mov    -0x38(%rsp),%rbx
-// CHECK-NEXT:  	add    $0x1c00,%rbx
+// CHECK-NEXT:  	add    $0x1c00,%rsi
 // CHECK-NEXT:  	xor    %eax,%eax
-// CHECK-NEXT:  	nopl   0x0(%rax,%rax,1)
+// CHECK-NEXT:  	data16 data16 cs nopw 0x0(%rax,%rax,1)
 // CHECK-NEXT:  	mov    %rax,%rcx
 // CHECK-NEXT:  	shl    $0xa,%rcx
 // CHECK-NEXT:  	add    %rdx,%rcx
-// CHECK-NEXT:  	mov    %rbx,%r8
+// CHECK-NEXT:  	mov    %rsi,%r8
 // CHECK-NEXT:  	xor    %r9d,%r9d
 // CHECK-NEXT:  	vmovups 0xe0(%rcx,%r9,4),%ymm0
 // CHECK-NEXT:  	vmovups 0xc0(%rcx,%r9,4),%ymm1
@@ -249,7 +158,7 @@ func.func @myfun(
 // CHECK-NEXT:  	add    $0x8,%r10
 // CHECK-NEXT:  	add    $0x2000,%r11
 // CHECK-NEXT:  	cmp    $0x1f8,%r10
-// CHECK-NEXT:  	jb     <myfun+0x370>
+// CHECK-NEXT:  	jb     <myfun+0x130>
 // CHECK-NEXT:  	vmovups %ymm4,(%rcx,%r9,4)
 // CHECK-NEXT:  	vmovups %ymm5,0x20(%rcx,%r9,4)
 // CHECK-NEXT:  	vmovups %ymm6,0x40(%rcx,%r9,4)
@@ -258,21 +167,15 @@ func.func @myfun(
 // CHECK-NEXT:  	vmovups %ymm2,0xa0(%rcx,%r9,4)
 // CHECK-NEXT:  	vmovups %ymm1,0xc0(%rcx,%r9,4)
 // CHECK-NEXT:  	vmovups %ymm0,0xe0(%rcx,%r9,4)
-// CHECK-NEXT:  	lea    0x40(%r9),%rsi
+// CHECK-NEXT:  	lea    0x40(%r9),%r10
 // CHECK-NEXT:  	add    $0x100,%r8
 // CHECK-NEXT:  	cmp    $0xc0,%r9
-// CHECK-NEXT:  	mov    %rsi,%r9
-// CHECK-NEXT:  	jb     <myfun+0x320>
+// CHECK-NEXT:  	mov    %r10,%r9
+// CHECK-NEXT:  	jb     <myfun+0xe0>
 // CHECK-NEXT:  	lea    0x1(%rax),%rcx
 // CHECK-NEXT:  	add    $0x800,%rdi
 // CHECK-NEXT:  	cmp    $0xff,%rax
 // CHECK-NEXT:  	mov    %rcx,%rax
-// CHECK-NEXT:  	jb     <myfun+0x310>
-// CHECK-NEXT:  	pop    %rbx
-// CHECK-NEXT:  	pop    %r12
-// CHECK-NEXT:  	pop    %r13
-// CHECK-NEXT:  	pop    %r14
-// CHECK-NEXT:  	pop    %r15
-// CHECK-NEXT:  	pop    %rbp
+// CHECK-NEXT:  	jb     <myfun+0xd0>
 // CHECK-NEXT:  	vzeroupper
-// CHECK-NEXT:  	ret{{.*}}
+// CHECK-NEXT:  	ret

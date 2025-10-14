@@ -11,4 +11,5 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
 		outs(%C: memref<256x256xf64>)
 		return
 }
-// CHECK:  j cannot be implicitly fully unrolled on an axis that isn't tiled (needs an unroll factor)
+// CHECK:      j cannot be implicitly fully unrolled on an axis
+// CHECK-NEXT: that isn't tiled (needs an unroll factor)
