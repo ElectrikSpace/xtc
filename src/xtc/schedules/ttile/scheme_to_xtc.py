@@ -871,6 +871,11 @@ def launch_and_measure_scheme_graph_interf(
         if pmu_counters[i_time_ref] in ltime_counter_names:  # If the counter is time
             time = res_measurement[pmu_counters[i_time_ref]]
 
+            if (
+                pmu_counters[i_time_ref] != "time"
+            ):  # "time" is in second, the rest in "ns"
+                time = time / 1e9
+
             # Get the peak_perf
             # xdsl_transform got utils.py :: cpu_peak_time(ops: int, dtype: str, threads: int = 1)
             num_ops = compute_number_ops(comp, dsizes)
