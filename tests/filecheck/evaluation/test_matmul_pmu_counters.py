@@ -2,6 +2,7 @@
 
 import xtc.graphs.xtc.op as O
 from xtc.backends.mlir import Backend
+from sys import platform
 
 I, J, K, dtype = 4, 32, 512, "float32"
 a = O.tensor((I, K), dtype, name="A")
@@ -27,16 +28,21 @@ comp = impl.get_compiler(
     dump_file="matmul_mlir",
 )
 module = comp.compile(sched)
+
 pmu_counters = [
     "cycles",
-    "clocks",
-    "mem_load_retired.l1_miss",
-    "mem_load_retired.l2_miss",
-    "mem_load_retired.l3_miss",
-    "fp_arith_inst_retired.128b_packed_single",
-    "fp_arith_inst_retired.256b_packed_single",
-    "fp_arith_inst_retired.512b_packed_single",
 ]
+
+if platform == "linux" or platform == "linux2":
+    pmu_counters += [
+        "clocks",
+        "mem_load_retired.l1_miss",
+        "mem_load_retired.l2_miss",
+        "mem_load_retired.l3_miss",
+        "fp_arith_inst_retired.128b_packed_single",
+        "fp_arith_inst_retired.256b_packed_single",
+        "fp_arith_inst_retired.512b_packed_single",
+    ]
 evaluator = module.get_evaluator(
     validate=True,
     pmu_counters=pmu_counters,

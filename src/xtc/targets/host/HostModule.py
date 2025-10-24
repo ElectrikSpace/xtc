@@ -5,6 +5,8 @@
 from typing import Any, cast
 from typing_extensions import override
 
+import sys
+
 import xtc.itf as itf
 from xtc.itf.graph import Graph
 from xtc.graphs.xtc.graph import XTCGraph
@@ -34,7 +36,11 @@ class HostModule(itf.comp.Module):
         self._file_name = file_name
         self._file_type = file_type
         assert self._file_type == "shlib", "only support shlib for JIR Module"
-        assert self._file_name.endswith(".so"), "file name is not a shlib"
+        lib_suffix = "so"
+        if sys.platform == "darwin":
+            lib_suffix = "dylib"
+        assert self._file_name.endswith(f".{lib_suffix}"), "file name is not a shlib"
+
         self._bare_ptr = kwargs.get("bare_ptr", True)
         self._graph = graph
         if self._graph is not None:

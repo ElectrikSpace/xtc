@@ -77,11 +77,15 @@ class MlirCTarget(MlirTarget):
             dump_tmp_dir = Path(dump_file).parent
         dump_base = Path(dump_file).name
 
+        suffix_lib = "so"
+        if sys.platform == "darwin":
+            suffix_lib = "dylib"
+
         dump_tmp_file = f"{dump_tmp_dir}/{dump_base}"
         c_dump_file = f"{dump_tmp_file}.c"
         obj_dump_file = f"{dump_tmp_file}.o"
         exe_c_file = f"{dump_tmp_file}.main.c"
-        so_dump_file = f"{dump_file}.so"
+        so_dump_file = f"{dump_file}.{suffix_lib}"
         exe_dump_file = f"{dump_file}.out"
         src_ir_dump_file = f"{dump_base}.mlir"
         mlir_btrn_dump_file = f"{dump_base}.before_trn.mlir"

@@ -9,6 +9,7 @@ import subprocess
 import threading
 import shlex
 import logging
+from sys import platform
 from pathlib import Path
 from typing import Any
 
@@ -150,7 +151,7 @@ def compile_runtime(out_dll: str):
         "alloc.c",
         "fclock.c",
         "evaluate_flops.c",
-        "perf_event.c",
+        "perf_event_darwin.c" if platform == "darwin" else "perf_event_linux.c",
     ]
     top_dir = Path(__file__).parents[2]
     src_dir = top_dir / "csrcs" / "runtimes" / "host"

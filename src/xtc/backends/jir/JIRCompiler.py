@@ -8,6 +8,7 @@ from pathlib import Path
 from copy import deepcopy
 import tempfile
 import subprocess
+import sys
 
 from xdsl.dialects.builtin import ModuleOp, StringAttr
 from jir.environment import get_host_target_triple
@@ -171,14 +172,17 @@ class JIRCompiler(itf.comp.Compiler):
         compiled_obj = self._llc_compiler(compiled_bc, pic=self.shared_lib)
 
         compiled_so = self._shlib_compiler(compiled_obj)
-        library_path = f"{lib_path}.so"
+        suffix_lib = "so"
+        if sys.platform == "darwin":
+            suffix_lib = "dylib"
+        library_path = f"{lib_path}.{suffix_lib}"
         with open(library_path, "wb") as out:
             out.write(compiled_so)
 
         return HostModule(
             dump_base,
             func_name,
-            f"{lib_path}.so",
+            f"{lib_path}.{suffix_lib}",
             "shlib",
             bare_ptr=self.bare_ptr,
             graph=self._backend._graph,

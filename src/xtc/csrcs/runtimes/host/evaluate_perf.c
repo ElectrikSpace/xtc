@@ -30,57 +30,61 @@ typedef int (*packed_func_t)(PackedArg *, int *, int, PackedArg *, int *);
 
 #define NUMBER_FACTOR 2
 
-#define define_evaluateN(FUNC, ...)					\
-  {									\
-  assert(repeat > 0);							\
-  assert(number > 0);							\
-  assert(min_repeat_ms >= 0);						\
+#define define_evaluateN(FUNC, ...)                                     \
+{                                                                       \
+  assert(repeat > 0);                                                   \
+  assert(number > 0);                                                   \
+  assert(min_repeat_ms >= 0);                                           \
                                                                         \
   int fd = -1;                                                          \
-  int *events = NULL;                                                   \
-  uint64_t *values = NULL;                                              \
+  perf_event_args_t *events = NULL;                                     \
+  int *perf_fds = NULL;                                                 \
+  uint64_t* values = NULL;                                              \
   if (events_num > 0) {                                                 \
+    perf_fds = alloca(events_num*sizeof(*perf_fds));                    \
     events = alloca(events_num*sizeof(*events));                        \
     values = alloca(events_num*sizeof(*values));                        \
-  }                                                                     \
-  int ret = open_perf_events_names(events_num, events_names, events, &fd); \
-  assert(ret == 0);                                                     \
-                                                                        \
-  mem_barrier();							\
-  (void)func(__VA_ARGS__);						\
-  mem_barrier();							\
-                                                                        \
-  for (int r = 0; r < repeat; r++) {					\
-    double elapsed;							\
-    int attempts = number;						\
-    while (1) {								\
-      reset_perf_events(fd);                                            \
-      elapsed = fclock();						\
-      start_perf_events(fd);                                            \
-      for (int a = 0; a < attempts; a++) {				\
-	mem_barrier();							\
-	(void)func(__VA_ARGS__);					\
-	mem_barrier();							\
-      }									\
-      stop_perf_events(fd);                                             \
-      elapsed = fclock() - elapsed;					\
-      if (elapsed * 1000 >= (double)min_repeat_ms)			\
-	break;								\
-      attempts *= NUMBER_FACTOR;					\
-    }									\
-    read_perf_events(events_num, events, values);                       \
-    if (events_num > 0) {                                               \
-      for (int e = 0; e < events_num; e++) {                            \
-          if (events[e] < 0)                                            \
-              results[r*events_num+e] = (double)-1;                     \
-          else                                                          \
-              results[r*events_num+e] = ((double)values[e]) / attempts; \
-      }									\
-    } else {                                                            \
-        results[r] = elapsed / attempts;                                \
+    for(int e = 0; e < events_num; e++) {                               \
+      int ret = get_perf_event_config(events_names[e], &events[e]);     \
+      assert(ret == 0);                                                 \
     }                                                                   \
   }                                                                     \
-  close_perf_events(events_num, events);                                \
+  open_perf_events(events_num, events, perf_fds);                       \
+                                                                        \
+  mem_barrier();                                                        \
+  (void)func(__VA_ARGS__);                                              \
+  mem_barrier();                                                        \
+                                                                        \
+  for (int r = 0; r < repeat; r++) {                                    \
+    double elapsed;                                                     \
+    int attempts = number;                                              \
+    while (1) {                                                         \
+      reset_perf_events(events_num, perf_fds, values);                  \
+      elapsed = fclock();                                               \
+      start_perf_events(events_num, perf_fds, values);                  \
+      for (int a = 0; a < attempts; a++) {                              \
+        mem_barrier();                                                  \
+        (void)func(__VA_ARGS__);                                        \
+        mem_barrier();                                                  \
+      }                                                                 \
+      stop_perf_events(events_num, perf_fds, values);                   \
+      elapsed = fclock() - elapsed;                                     \
+      if (elapsed * 1000 >= (double)min_repeat_ms)                      \
+        break;                                                          \
+      attempts *= NUMBER_FACTOR;                                        \
+    }                                                                   \
+    if (events_num > 0) {                                               \
+      for (int e = 0; e < events_num; e++) {                            \
+        results[r*events_num+e] = ((double)values[e]) / attempts;       \
+      }                                                                 \
+    } else {                                                            \
+      results[r] = elapsed / attempts;                                  \
+    }                                                                   \
+  }                                                                     \
+  for (int e = 0; e < events_num; e++) {                                \
+    perf_event_args_destroy(events[e]);                                 \
+  }                                                                     \
+  close_perf_events(events_num, perf_fds);                              \
 }
 
 void evaluate_packed_perf(double *results, int events_num, const char *events_names[],

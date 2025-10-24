@@ -53,8 +53,7 @@ extern double fclock(void); /* from fclock.c */
 
 #define NOINLINE __attribute__((noinline))
 #define mem_barrier() asm("":::"memory")
-#define opaque_addr(ptr) ({typeof(ptr) _ptr = (ptr); __asm__ __volatile__("# opaque %0":"+p"(_ptr)::"memory"); _ptr; })
-
+#define opaque_addr(ptr) ({typeof(ptr) _ptr = (ptr); __asm__ __volatile__("# opaque %0":"+r"(_ptr)::"memory"); _ptr; })
 #define VSIZE V16SIZE
 #define VTYPE V16TYPE
 #define VZERO V16ZERO

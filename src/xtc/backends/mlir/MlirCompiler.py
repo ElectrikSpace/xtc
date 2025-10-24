@@ -88,10 +88,13 @@ class MlirCompiler(itf.comp.Compiler):
                     "np_outputs_spec": self._backend.np_outputs_spec,
                 }
             )
+        suffix_lib = "so"
+        if sys.platform == "darwin":
+            suffix_lib = "dylib"
         module = self._target.create_module(
             Path(compiler.dump_file).name,
             self._backend.payload_name,
-            f"{compiler.dump_file}.so",
+            f"{compiler.dump_file}.{suffix_lib}",
             "shlib",
             bare_ptr=self._config.bare_ptr,
             graph=self._backend._graph,

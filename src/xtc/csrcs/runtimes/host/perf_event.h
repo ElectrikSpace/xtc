@@ -7,11 +7,52 @@
 
 #include <stdint.h>
 
-extern int open_perf_events_names(int n_events, const char *names[], int *fds, int *group_fd);
-extern int close_perf_events(int n_events, int *fds);
-extern void reset_perf_events(int group_fd);
-extern void start_perf_events(int group_fd);
-extern void stop_perf_events(int group_fd);
-extern void read_perf_events(int n_events, const int *fds, uint64_t *results);
+#define PERF_EVENT_MAX_EVENTS 256
+
+#define PERF_EVENT_CYCLES 0
+#define PERF_EVENT_CLOCKS 1
+#define PERF_EVENT_INSTRS 2
+#define PERF_EVENT_MIGRATIONS 3
+#define PERF_EVENT_SWITCHES 4
+#define PERF_EVENT_CACHE_ACCESS 5
+#define PERF_EVENT_CACHE_MISSES 6
+#define PERF_EVENT_BRANCH_INSTRS 7
+#define PERF_EVENT_BRANCH_MISSES 8
+#define PERF_EVENT_NUM 9
+
+typedef struct {
+    int type;
+    int event;
+} perf_event_type_event_t;
+
+typedef enum {
+    PERF_ARG_GENERIC,
+    PERF_ARG_PTR
+} perf_event_arg_mode_t;
+
+typedef struct {
+    perf_event_arg_mode_t mode;
+    union {
+        perf_event_type_event_t config_pair;
+        const void* config_ptr;
+    } args;
+} perf_event_args_t;
+
+extern int all_perf_events[PERF_EVENT_NUM];
+extern int open_perf_event(perf_event_args_t event);
+extern int open_cycles_event();
+extern int open_clock_event();
+extern uint64_t read_perf_event(int perf_fd);
+extern void close_perf_event(int perf_fd);
+extern void open_raw_perf_events(int n_events, const int *events_pairs, int *fds);
+extern void open_perf_events(int n_events, const perf_event_args_t *events, int *fds);
+extern void close_perf_events(int n_events, const int *fds);
+extern void reset_perf_events(int n_events, const int *fds, uint64_t *results);
+extern void start_perf_events(int n_events, const int *fds, uint64_t *results);
+extern void stop_perf_events(int n_events, const int *fds, uint64_t *results);
+extern int get_perf_event_config(const char *name, perf_event_args_t* event);
+
+extern void perf_event_args_destroy(perf_event_args_t args);
+
 
 #endif

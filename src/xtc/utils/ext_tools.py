@@ -5,11 +5,15 @@
 import ctypes.util
 import subprocess
 import re
+import platform
 
 
 def get_library_path(libname: str) -> str:
     libfile = ctypes.util.find_library(libname)
     assert libfile
+
+    if platform.system() == "Darwin":
+        return libfile
 
     result = subprocess.run(["/sbin/ldconfig", "-p"], capture_output=True, text=True)
     for line in result.stdout.splitlines():
@@ -108,11 +112,18 @@ shared_lib_opts = ["--shared", *cc_opts]
 
 exe_opts = [*cc_opts]
 
-runtime_libs = [
-    "libmlir_runner_utils.so",
-    "libmlir_c_runner_utils.so",
-    "libmlir_async_runtime.so",
-]
+if platform.system() == "Darwin":
+    runtime_libs = [
+        "libmlir_runner_utils.dylib",
+        "libmlir_c_runner_utils.dylib",
+        "libmlir_async_runtime.dylib",
+    ]
+else:
+    runtime_libs = [
+        "libmlir_runner_utils.so",
+        "libmlir_c_runner_utils.so",
+        "libmlir_async_runtime.so",
+    ]
 
 system_libs = [get_library_path("omp")]
 
