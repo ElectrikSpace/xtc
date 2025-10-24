@@ -179,7 +179,7 @@ class JIRCompiler(itf.comp.Compiler):
         return HostModule(
             dump_base,
             func_name,
-            f"{lib_path}.{suffix_lib}",
+            f"{lib_path}.{get_library_platform_extension()}",
             "shlib",
             bare_ptr=self.bare_ptr,
             graph=self._backend._graph,
