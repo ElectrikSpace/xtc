@@ -37,7 +37,7 @@ from xtc.utils.tools import (
 )
 from xtc.utils.ext_tools import (
     cc_bin,
-    get_library_platform_extension,
+    get_shlib_extension,
     llc_opts,
     opt_opts,
     runtime_libs,
@@ -172,14 +172,14 @@ class JIRCompiler(itf.comp.Compiler):
         compiled_obj = self._llc_compiler(compiled_bc, pic=self.shared_lib)
 
         compiled_so = self._shlib_compiler(compiled_obj)
-        library_path = f"{lib_path}.{get_library_platform_extension()}"
+        library_path = f"{lib_path}.{get_shlib_extension()}"
         with open(library_path, "wb") as out:
             out.write(compiled_so)
 
         return HostModule(
             dump_base,
             func_name,
-            f"{lib_path}.{get_library_platform_extension()}",
+            f"{lib_path}.{get_shlib_extension()}",
             "shlib",
             bare_ptr=self.bare_ptr,
             graph=self._backend._graph,
@@ -342,7 +342,7 @@ class JIRCompiler(itf.comp.Compiler):
             input_obj = f"{tdir}/input.o"
             with open(input_obj, "wb") as outf:
                 outf.write(obj_module)
-            temp_so = f"{tdir}/output.{get_library_platform_extension()}"
+            temp_so = f"{tdir}/output.{get_shlib_extension()}"
             shlib_cmd = [
                 *self._cmd_cc,
                 *shared_lib_opts,

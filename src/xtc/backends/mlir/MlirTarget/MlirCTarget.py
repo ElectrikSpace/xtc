@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 
 from xtc.utils.ext_tools import (
-    get_library_platform_extension,
+    get_shlib_extension,
     xtctranslate_opts,
     shared_lib_opts,
     exe_opts,
@@ -82,7 +82,7 @@ class MlirCTarget(MlirTarget):
         c_dump_file = f"{dump_tmp_file}.c"
         obj_dump_file = f"{dump_tmp_file}.o"
         exe_c_file = f"{dump_tmp_file}.main.c"
-        so_dump_file = f"{dump_file}.{get_library_platform_extension()}"
+        so_dump_file = f"{dump_file}.{get_shlib_extension()}"
         exe_dump_file = f"{dump_file}.out"
         src_ir_dump_file = f"{dump_base}.mlir"
         mlir_btrn_dump_file = f"{dump_base}.before_trn.mlir"

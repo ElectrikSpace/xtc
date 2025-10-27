@@ -24,7 +24,7 @@ def get_library_path(libname: str) -> str:
     assert False
 
 
-def get_library_platform_extension():
+def get_shlib_extension():
     if platform.system() == "Darwin":
         return "dylib"
 
@@ -121,9 +121,9 @@ exe_opts = [*cc_opts]
 
 
 runtime_libs = [
-    f"libmlir_runner_utils.{get_library_platform_extension()}",
-    f"libmlir_c_runner_utils.{get_library_platform_extension()}",
-    f"libmlir_async_runtime.{get_library_platform_extension()}",
+    f"libmlir_runner_utils.{get_shlib_extension()}",
+    f"libmlir_c_runner_utils.{get_shlib_extension()}",
+    f"libmlir_async_runtime.{get_shlib_extension()}",
 ]
 
 system_libs = [get_library_path("omp")]

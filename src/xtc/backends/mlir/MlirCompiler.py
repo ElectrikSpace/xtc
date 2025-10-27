@@ -27,7 +27,7 @@ from xtc.backends.mlir.MlirTarget import (
     get_target_from_name,
     get_default_target,
 )
-from xtc.utils.ext_tools import get_library_platform_extension
+from xtc.utils.ext_tools import get_shlib_extension
 
 
 class MlirCompiler(itf.comp.Compiler):
@@ -92,7 +92,7 @@ class MlirCompiler(itf.comp.Compiler):
         module = self._target.create_module(
             Path(compiler.dump_file).name,
             self._backend.payload_name,
-            f"{compiler.dump_file}.{get_library_platform_extension()}",
+            f"{compiler.dump_file}.{get_shlib_extension()}",
             "shlib",
             bare_ptr=self._config.bare_ptr,
             graph=self._backend._graph,
