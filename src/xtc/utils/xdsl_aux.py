@@ -11,20 +11,20 @@ from xdsl.ir import (
 )
 from xdsl.dialects.arith import ConstantOp
 from xdsl.dialects.builtin import (
-    AnyMemRefType,
-    AnyIntegerAttr,
+    MemRefType,
+    IntegerAttr,
     FloatAttr,
     IntegerType,
 )
 
-from xdsl.context import MLContext
+from xdsl.context import Context
 from xdsl.parser import Parser
 from xdsl.dialects import func, linalg, arith, memref
 from xdsl.dialects.builtin import ModuleOp
 
 
 def parse_xdsl_module(source: str) -> ModuleOp:
-    context = MLContext()
+    context = Context()
     context.load_dialect(func.Func)
     context.load_dialect(linalg.Linalg)
     context.load_dialect(arith.Arith)
@@ -39,7 +39,7 @@ def xdsl_operator_to_function(source_op: Operation, name: str) -> func.FuncOp:
     operands = source_op.operands
     shaped_types, scalar_types = [], []
     for o in operands:
-        if isa(o.type, AnyMemRefType):
+        if isa(o.type, MemRefType):
             shaped_types.append(o.type)
         else:
             scalar_types.append(o.type)
@@ -49,12 +49,12 @@ def xdsl_operator_to_function(source_op: Operation, name: str) -> func.FuncOp:
     concrete_operands = []
     shaped_count, scalar_count = 0, 0
     for o in operands:
-        if isa(o.type, AnyMemRefType):
+        if isa(o.type, MemRefType):
             concrete_operands.append(payload.args[shaped_count])
             shaped_count += 1
         else:
             if isa(o.type, IntegerType):
-                attr = AnyIntegerAttr(0, scalar_types[scalar_count])
+                attr = IntegerAttr(0, scalar_types[scalar_count])
             else:
                 attr = FloatAttr(0.0, scalar_types[scalar_count])
             constant = ConstantOp(attr)

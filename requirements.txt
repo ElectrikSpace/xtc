@@ -5,5 +5,5 @@ ordered-set
 py-cpuinfo
 tqdm
 typing_extensions
+xdsl~=0.50.0
 pyyaml
-xdsl~=0.26.0

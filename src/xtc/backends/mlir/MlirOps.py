@@ -205,7 +205,7 @@ class MlirOperatorMatmul(MlirOperator):
 
 
 @irdl_op_definition
-class Conv2DNhwcHwFcOp(linalg.ConvOpsBase):
+class Conv2DNhwcHwFcOp(linalg.ConvOperation):
     """
     Performs 2-D convolution with inputs (N, H, W, C) (R, S, C F)
 
@@ -378,32 +378,28 @@ class MlirOperatorRelu(MlirOperator):
         inp_size, out_size = [mulall(shape) for shape in [inp_shape, out_shape]]
         assert inp_size == out_size
         with ImplicitBuilder(block):
+            inp_reassociation = builtin.ArrayAttr(
+                [
+                    builtin.ArrayAttr(
+                        [builtin.IntegerAttr(x, i64) for x in range(len(inp_shape))]
+                    )
+                ]
+            )
+            out_reassociation = builtin.ArrayAttr(
+                [
+                    builtin.ArrayAttr(
+                        [builtin.IntegerAttr(x, i64) for x in range(len(out_shape))]
+                    )
+                ]
+            )
             inp = memref.CollapseShapeOp(
                 operands=[args[0]],
-                properties=dict(
-                    reassociation=memref.ReassociationAttr(
-                        [
-                            builtin.ArrayAttr(
-                                builtin.IntegerAttr(x, i64)
-                                for x in range(len(inp_shape))
-                            ),
-                        ]
-                    )
-                ),
+                properties=dict(reassociation=inp_reassociation),
                 result_types=[MemRefType(elt_type, (inp_size,))],
             )
             out = memref.CollapseShapeOp(
                 operands=[args[1]],
-                properties=dict(
-                    reassociation=memref.ReassociationAttr(
-                        [
-                            builtin.ArrayAttr(
-                                builtin.IntegerAttr(x, i64)
-                                for x in range(len(out_shape))
-                            ),
-                        ]
-                    )
-                ),
+                properties=dict(reassociation=out_reassociation),
                 result_types=[MemRefType(elt_type, (out_size,))],
             )
             cst0 = arith.ConstantOp(builtin.FloatAttr(0, elt_size))

@@ -1,4 +1,4 @@
-// RUN: not mlir-loop --no-alias --print-source-ir %s 2>&1 | filecheck %s
+// RUN: mlir-loop --no-alias --print-source-ir %s 2>&1 | filecheck %s
 
 func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<256x256xf64>){
 	linalg.matmul {
@@ -13,4 +13,32 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
 	return
 }
 
-// CHECK:  {'k'} defined but never used
+// CHECK:       // -----// IR Dump Before transform //----- //
+// CHECK-NEXT:  module attributes {transform.with_named_sequence} {
+// CHECK-NEXT:    func.func @matmul(%arg0: memref<256x512xf64> {llvm.noalias}, %arg1: memref<512x256xf64> {llvm.noalias}, %arg2: memref<256x256xf64> {llvm.noalias}) {
+// CHECK-NEXT:      linalg.matmul {__node0__} ins(%arg0, %arg1 : memref<256x512xf64>, memref<512x256xf64>) outs(%arg2 : memref<256x256xf64>)
+// CHECK-NEXT:      return
+// CHECK-NEXT:    }
+// CHECK-NEXT:    transform.named_sequence @_vecto(%arg0: !transform.any_op {transform.consumed}) {
+// CHECK-NEXT:      transform.structured.vectorize %arg0 : !transform.any_op
+// CHECK-NEXT:      transform.yield 
+// CHECK-NEXT:    }
+// CHECK-NEXT:    transform.named_sequence @__transform_main(%arg0: !transform.any_op {transform.readonly}) {
+// CHECK-NEXT:      %0 = transform.structured.match attributes {__node0__} in %arg0 : (!transform.any_op) -> !transform.any_op
+// CHECK-NEXT:      %first, %second = transform.structured.split %0 after 5  {dimension = 0 : i64} : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op, %loops = transform.structured.tile_using_for %first tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops "__node0__/i[0]/i" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_0, %loops_1 = transform.structured.tile_using_for %tiled_linalg_op tile_sizes [0, 1, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_1 "__node0__/i[0]/j" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_2, %loops_3 = transform.structured.tile_using_for %tiled_linalg_op_0 tile_sizes [0, 0, 1] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_3 "__node0__/i[0]/k" : !transform.any_op
+// CHECK-NEXT:      %1 = transform.get_parent_op %loops {isolated_from_above} : (!transform.any_op) -> !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_4, %loops_5 = transform.structured.tile_using_for %second tile_sizes [1, 0, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_5 "__node0__/i[1]/i" : !transform.any_op
+// CHECK-NEXT:      %tiled_linalg_op_6, %loops_7 = transform.structured.tile_using_for %tiled_linalg_op_4 tile_sizes [0, 1, 0] : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+// CHECK-NEXT:      transform.annotate %loops_7 "__node0__/i[1]/j" : !transform.any_op
+// CHECK-NEXT:      %2 = transform.get_parent_op %loops_5 {isolated_from_above} : (!transform.any_op) -> !transform.any_op
+// CHECK-NEXT:      %3 = transform.get_parent_op %loops {isolated_from_above} : (!transform.any_op) -> !transform.any_op
+// CHECK-NEXT:      transform.yield 
+// CHECK-NEXT:    }
+// CHECK-NEXT:  }

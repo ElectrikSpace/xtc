@@ -28,9 +28,14 @@ class Descript:
     def apply(self, node_name: str, spec: dict[str, dict]):
         flat_schedules = self._flatten_schedule(root=node_name, spec=spec, head=[])
         self._check_flattened_schedule(flat_schedules)
+        self._check_sizes(flat_schedules)
 
         self.scheduler.set_dims(self.abstract_axis)
         for schedule in flat_schedules:
+            self._check_unroll_parameter_domain(schedule)
+            self._check_tile_parameter_domain(schedule)
+            self._check_unrolling_tiling(schedule)
+
             root = schedule["root"]
 
             for d, s in schedule["splits"].items():
@@ -126,12 +131,7 @@ class Descript:
                 interchange.append(loop_name)
 
             else:
-                raise Exception(
-                    f"""
-                    Axis {declaration} is not a defined axis.
-                    Known axis are: {self.abstract_axis}")
-                    """
-                )
+                self._unknown_axis_error(declaration)
 
             annotate(loop_name=loop_name, sizes=sizes, annotations=val, sched=sched)
 
@@ -148,48 +148,141 @@ class Descript:
         sched["interchange"] = interchange
         return [sched] + recursive_scheds
 
-    def _check_flattened_schedule(self, flat_schedules: list[dict[str, Any]]):
-        """Procedure that perform multiple checks on a flattened schedule
-        If one of them fails, it raises an error"""
-
-        loop_to_axis: dict[str, str] = dict()
-        axis: set[str] = set()
-        axis_seen: set[str] = set()
+    def _check_flattened_schedule(self, flat_schedules: list[dict[str, Any]]) -> None:
+        tiles_to_axis: dict[str, str] = {}
+        splits_to_axis: dict[str, str] = {}
+        dims: list[str] = []
+        seen_axes: dict[str, int | None] = {}
         for sched in flat_schedules:
-            for key in sched["tiles"]:
-                axis.add(key)
-                for value in sched["tiles"][key]:
-                    loop_to_axis[value] = key
-                loop_to_axis[key] = key
+            tiles = sched["tiles"]
+            interchange = sched["interchange"]
+            unrolls = sched["unroll"]
+            vectorize = sched["vectorize"]
 
-            for loop in sched["interchange"]:
-                if loop in axis:
-                    axis_seen.add(loop)
-                elif loop in loop_to_axis and not loop_to_axis[loop] in axis_seen:
+            tiles_to_axis.update(self._get_tiles_to_axis(sched))
+            splits_to_axis.update(self._get_splits_to_axis(sched))
+            dims += self._get_axis(sched)
+            loops_to_axis = tiles_to_axis | splits_to_axis | dict(zip(dims, dims))
+            vect_above = False
+
+            for loop_name in interchange:
+                # Vectorization inconsistencies
+                if loop_name in vectorize:
+                    vect_above = True
+                elif vect_above:
+                    raise Exception(
+                        f"Inner loop {loop_name} isn't vectorized but an outer one is."
+                    )
+                # Tiling inconsistencies (odd sizes, use before define)
+                if loop_name in dims:
+                    seen_axes[loop_name] = None
+                elif loop_name in tiles_to_axis:
+                    axis = tiles_to_axis[loop_name]
+                    if axis not in seen_axes:
+                        raise Exception(
+                            f"""
+                            Axis '{axis}' must be defined before tiling can produce loop '{loop_name}'.
+                            """
+                        )
+                    old_tile_size = seen_axes[axis]
+                    tile_size = tiles[axis][loop_name]
+                    if old_tile_size is not None and tile_size > old_tile_size:
+                        raise Exception(
+                            f"""
+                            Inner tile {loop_name} on axis {axis} must be smaller than outer loop.
+                            """
+                        )
+                    seen_axes[axis] = tile_size
+
+            # Full unrolling needs tile size
+            for loop_name in unrolls:
+                axis = loops_to_axis[loop_name]
+                if len(tiles[axis]) == 0 and unrolls[loop_name] == None:
                     raise Exception(
                         f"""
-                        {loop_to_axis[loop]} is not defined but required
-                        to produce {loop} (by tiling).
+                        {axis} cannot be implicitly fully unrolled on an axis
+                        that isn't tiled (needs an unroll factor)
                         """
                     )
 
-            for key in sched["splits"]:
-                for value in sched["splits"][key]:
-                    loop_to_axis[value] = key
-                loop_to_axis[key] = key
+        for dim in self.abstract_axis:
+            if dim not in dims:
+                raise Exception(f"{dim} defined but never used")
 
-            self._check_unroll_parameter_domain(sched)
-            self._check_tile_parameter_domain(sched)
+    def _check_sizes(self, flat_sched: list[dict[str, Any]]):
+        self._check_sizes_aux(flat_sched, {})
 
-            self._check_unrolling_tiling(sched)
-            self._check_no_tile_full_unroll(sched, loop_to_axis)
-            self._check_axis_definition(sched, loop_to_axis)
+    def _check_sizes_aux(
+        self,
+        flat_sched: list[dict[str, Any]],
+        current_size_of_dim: dict[str, int | None] = {},
+    ):
+        if len(flat_sched) == 0:
+            return
+        sched = flat_sched[0]
+        splits = sched["splits"]
+        tiles = sched["tiles"]
+        interchange = sched["interchange"]
 
-        self._check_splits(
-            flat_sched=flat_schedules,
-            loop_to_axis=loop_to_axis,
-            unused_axis={e for e in self.abstract_axis},
+        tiles_to_axis = self._get_tiles_to_axis(sched)
+        splits_to_axis = self._get_splits_to_axis(sched)
+        dims = self._get_axis(sched)
+        loops_to_axis = tiles_to_axis | splits_to_axis | dict(zip(dims, dims))
+
+        splits_to_sizes: dict[str, int] = {}
+        for axis in splits:
+            last_start = None
+            for loop_name, start in reversed(splits[axis].items()):
+                if last_start is not None:
+                    size_of_split = last_start - start
+                    splits_to_sizes[loop_name] = size_of_split
+                last_start = start
+
+        for loop_name in interchange:
+            axis = loops_to_axis[loop_name]
+            if loop_name in dims:
+                if loop_name not in current_size_of_dim:
+                    current_size_of_dim[loop_name] = None
+            elif loop_name in tiles_to_axis:
+                loop_size = tiles[axis][loop_name]
+                old_dim_size = current_size_of_dim[axis]
+                if old_dim_size is not None and loop_size > old_dim_size:
+                    raise Exception(
+                        f"""
+                        Inner loop {loop_name} on axis {axis} must be smaller than outer loop.
+                        """
+                    )
+            elif loop_name in splits_to_axis:
+                new_current_size_of_dim = current_size_of_dim.copy()
+                if loop_name in splits_to_sizes:
+                    loop_size = splits_to_sizes[loop_name]
+                    new_current_size_of_dim[axis] = loop_size
+                else:
+                    new_current_size_of_dim[axis] = None
+                self._check_sizes_aux(
+                    flat_sched=flat_sched.copy()[1:],
+                    current_size_of_dim=new_current_size_of_dim,
+                )
+
+    def _get_axis(self, sched: dict[str, Any]) -> list[str]:
+        refined_loops = list(self._get_tiles_to_axis(sched)) + list(
+            self._get_splits_to_axis(sched)
         )
+        return [loop for loop in sched["interchange"] if loop not in refined_loops]
+
+    def _get_tiles_to_axis(self, sched: dict[str, Any]) -> dict[str, str]:
+        return self._get_subloops_to_axis("tiles", sched)
+
+    def _get_splits_to_axis(self, sched: dict[str, Any]) -> dict[str, str]:
+        return self._get_subloops_to_axis("splits", sched)
+
+    def _get_subloops_to_axis(self, key: str, sched: dict[str, Any]) -> dict[str, str]:
+        tiles = sched[key]
+        loop_to_axis: dict[str, str] = {}
+        for axis_name, subloops in tiles.items():
+            for loop_name in subloops:
+                loop_to_axis[loop_name] = axis_name
+        return loop_to_axis
 
     def _check_splitting_intervals(
         self,
@@ -262,30 +355,23 @@ class Descript:
                         """
                     )
 
-    def _check_axis_existence(self, axis: str):
-        if axis not in self.abstract_axis:  # axis not defined
-            raise Exception(
-                f"Axis {axis} is not a defined axis. Defined axis are: {self.abstract_axis}"
-            )
+    def _unknown_axis_error(self, axis: str):
+        raise Exception(
+            f"""
+            Axis {axis} is not a defined axis (defined axis: {self.abstract_axis}).
+            """
+        )
 
-    def _check_axis_definition(
-        self, sched: dict[str, Any], loop_to_axis: dict[str, str]
-    ):
-        """
-        Procedure that check if the axis used are defined and remove the used
-        one from the unused set.
-        """
-        interchange = sched["interchange"]
-        for loop_name in interchange:
-            axis = loop_to_axis[loop_name]
-            self._check_axis_existence(axis)
+    def _check_axis_existence(self, axis: str):
+        if axis not in self.abstract_axis:
+            self._unknown_axis_error(axis)
 
     def _check_unrolling_tiling(self, sched: dict[str, Any]) -> None:
         """Procedure that check if an unrolled axis fits in the tile"""
         tiles = sched["tiles"]
         unrolls = sched["unroll"]
 
-        for _, subaxis in tiles.items():
+        for subaxis in tiles.values():
             for subaxis_name, tile_size in subaxis.items():
                 # if the axis is unrolled and tiled and the unroll factor is
                 # greater then the tile size
@@ -302,131 +388,10 @@ class Descript:
                         """
                     )
 
-    def _check_no_tile_full_unroll(
-        self, sched: dict[str, Any], loop_to_axis: dict[str, str]
-    ) -> None:
-        tiles = sched["tiles"]
-        unrolls = sched["unroll"]
-
-        for loop_name in unrolls:
-            axis = loop_to_axis[loop_name]
-            if tiles[axis] == dict() and unrolls[loop_name] == None:
-                raise Exception(
-                    f"""
-                    {axis} cannot be implicitly fully unrolled on an axis
-                    that isn't tiled (needs an unroll factor)
-                    """
-                )
-
-    def _check_splits(
-        self,
-        flat_sched: list[dict[str, Any]],
-        loop_to_axis: dict[str, str],
-        unused_axis: set[str],
-        knowned_vectorized_axis: set[str] = set(),
-        last_sizes: dict[str, int] = dict(),
-        current_split_size: dict[str, int] = dict(),
-        sched_index: int = 0,
-        depth: int = 0,
-    ) -> int:
-        """Procedure that check the vectorization of each axis"""
-        sched = flat_sched[sched_index]
-        splits = sched["splits"]
-
-        self._check_vectorize_inner_tile(sched, loop_to_axis, knowned_vectorized_axis)
-        self._check_tile_size(sched, last_sizes.copy(), current_split_size)
-        self._check_axis_usage(sched, loop_to_axis, unused_axis)
-
-        sub_split_sizes = []
-        for axis in splits:
-            sub_split_size = dict()
-            last_start = None
-            for split, start in splits[axis].items():
-                if last_start is not None:
-                    sub_split_size[axis] = start - last_start
-                last_start = start
-
-            sub_split_sizes.append(sub_split_size)
-            sub_split_sizes.append(dict())
-
-        nbcall = 0
-        unused_axis_copy = {e for e in unused_axis}
-        for axis in splits.values():
-            for i in range(len(axis)):
-                nbcall += 1
-                unused_axis_copy = {e for e in unused_axis}
-                sched_index += self._check_splits(
-                    flat_sched=flat_sched,
-                    loop_to_axis=loop_to_axis,
-                    unused_axis=unused_axis_copy,
-                    knowned_vectorized_axis={e for e in knowned_vectorized_axis},
-                    last_sizes={key: value for key, value in last_sizes.items()},
-                    current_split_size=sub_split_sizes[i],
-                    sched_index=i + sched_index + 1,
-                    depth=depth + 1,
-                )
-
-        if unused_axis_copy != set():  # Some axis are not used
-            raise Exception(f"{unused_axis_copy} defined but never used")
-
-        return nbcall
-
-    def _check_vectorize_inner_tile(
-        self,
-        sched: dict[str, Any],
-        loop_to_axis: dict[str, str],
-        knowned_vectorized_axis: set[str] = set(),
-    ) -> None:
-        """Procedure that check the vectorization of each axis"""
-        vectorize: list[str] = sched["vectorize"]
-        interchange: list[str] = sched["interchange"]
-
-        vect_above = False
-        for loop_name in interchange:
-            if loop_name in vectorize:
-                vect_above = True
-            elif vect_above:
-                raise Exception(
-                    f"Inner loop {loop_name} isn't vectorized but an outer one is."
-                )
-
-    def _check_tile_size(
-        self,
-        sched: dict[str, Any],
-        last_sizes: dict[str, int],
-        current_split_size: dict[str, int] = dict(),
-    ) -> None:
-        """
-        Procedure that check for each axis if the inner tiles are smaller
-        than the outer tiles
-        """
-        tiles = sched["tiles"]
-
-        for axis, tile in tiles.items():
-            for tile_size in tile.values():
-                if axis not in last_sizes.keys():  # First tile tile_size found
-                    last_sizes[axis] = tile_size
-
-                elif last_sizes[axis] < tile_size != 0:
-                    raise Exception(
-                        f"Outer tile is smaller than inner tile on axis {axis}"
-                    )
-
-                if axis in current_split_size and current_split_size[axis] < tile_size:
-                    # Try to create tile that do not fit in the current split
-                    ssize = current_split_size[axis]
-                    raise Exception(
-                        f"""
-                        Current split on axis {axis} of size {ssize}
-                        cannot support tiles of size {tile_size}
-                        """
-                    )
-
     def _check_axis_usage(
         self, sched: dict[str, Any], loop_to_axis: dict[str, str], unused_axis: set[str]
     ):
         interchange: list[str] = sched["interchange"]
-
         for loop_name in interchange:
             axis = loop_to_axis[loop_name]
             if axis in unused_axis:  # Remove used axis from unused set

@@ -20,5 +20,4 @@ func.func @matmul(%A: memref<256x512xf64>, %B: memref<512x256xf64>, %C: memref<2
   return
 }
 
-// CHECK:      j is not defined but required
-// CHECK-NEXT: to produce j0 (by tiling).
+// CHECK:      Axis 'j' must be defined before tiling can produce loop 'j0'

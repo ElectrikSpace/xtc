@@ -348,7 +348,7 @@ class MlirProgramInsertTransformPass:
                     continue
 
                 # Fetch the dimension knowledge
-                dim_of_loop = schedule.dim_of_loop(loop)
+                dim_of_loop = schedule.dim_of_tile(loop)
                 index_of_dim = schedule.index_of_dim(dim_of_loop)
 
                 # Build the strip size

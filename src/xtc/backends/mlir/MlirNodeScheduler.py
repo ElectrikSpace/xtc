@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
-import os
 from typing_extensions import override
 from dataclasses import dataclass, asdict
 from pprint import pformat
@@ -12,6 +11,12 @@ __all__ = [
     "MlirNodeScheduler",
     "MlirNodeSchedule",
 ]
+
+ROOT_SEP = "/"
+
+
+def basename(loop_name: str) -> str:
+    return loop_name.split(ROOT_SEP)[-1]
 
 
 @dataclass(frozen=True)
@@ -30,10 +35,6 @@ class MlirNodeSchedule:
     def index_of_dim(self, dim: str) -> int:
         return list(self.dims).index(dim)
 
-    def is_base(self, loop_name: str) -> bool:
-        basename = os.path.basename(loop_name)
-        return basename in self.dims
-
     def is_tile(self, loop_name: str) -> bool:
         for tiles in self.tiles.values():
             for tile in tiles:
@@ -41,20 +42,18 @@ class MlirNodeSchedule:
                     return True
         return False
 
-    def dim_of_loop(self, loop_name: str) -> str:
+    def is_base(self, loop_name: str) -> bool:
+        return basename(loop_name) in self.dims
+
+    def dim_of_tile(self, loop_name: str) -> str:
         # Base dimension
-        basename = os.path.basename(loop_name)
-        if basename in self.dims:
-            return basename
+        bn = basename(loop_name)
+        if bn in self.dims:
+            return bn
         # Tiled dimension
         for dim, tiles in self.tiles.items():
             for tile in tiles:
-                if os.path.basename(loop_name) == dim or loop_name == tile:
-                    return dim
-        # Splitted dimension
-        for dim, splits in self.splits.items():
-            for split in splits:
-                if os.path.basename(loop_name) == dim or loop_name == split:
+                if bn == dim or loop_name == tile:
                     return dim
         assert False
 
@@ -110,7 +109,7 @@ class MlirNodeScheduler:
         return str(self.mlir_node_schedule())
 
     def get_default_interchange(self, root: str) -> list[str]:
-        ret = [f"{root}/{d}" for d in self.dims.copy()]
+        ret = [f"{root}{ROOT_SEP}{d}" for d in self.dims.copy()]
         for tile_level in range(len(max(self.tiles.values(), key=len))):
             for _, v in self.tiles.items():
                 if tile_level >= len(v):
@@ -127,25 +126,27 @@ class MlirNodeScheduler:
     def split(
         self, dim: str, segments: dict[str, int], root: str = DEFAULT_ROOT
     ) -> None:
-        segments_renamed = {f"{root}/{key}": val for key, val in segments.items()}
+        segments_renamed = {
+            f"{root}{ROOT_SEP}{key}": val for key, val in segments.items()
+        }
         self.splits[dim] = segments_renamed
         for s in segments_renamed:
             self.tiles[s] = {}
 
     def tile(self, dim: str, tiles: dict[str, int], root: str = DEFAULT_ROOT):
         for d, s in tiles.items():
-            tile_name = f"{root}/{d}"
+            tile_name = f"{root}{ROOT_SEP}{d}"
             self.tiles[dim][tile_name] = s
 
     def interchange(self, permutation: list[str], root: str = DEFAULT_ROOT):
-        self.permutation[root] = [f"{root}/{a}" for a in permutation]
+        self.permutation[root] = [f"{root}{ROOT_SEP}{a}" for a in permutation]
 
     def vectorize(self, axes: list[str], root: str = DEFAULT_ROOT):
-        self.vectorization += [f"{root}/{a}" for a in axes]
+        self.vectorization += [f"{root}{ROOT_SEP}{a}" for a in axes]
 
     def parallelize(self, axes: list[str], root: str = DEFAULT_ROOT):
-        self.parallelization = [f"{root}/{a}" for a in axes]
+        self.parallelization = [f"{root}{ROOT_SEP}{a}" for a in axes]
 
     def unroll(self, unrolls: dict[str, int], root: str = DEFAULT_ROOT):
         for dim, ufactor in unrolls.items():
-            self.unrolling[f"{root}/{dim}"] = ufactor
+            self.unrolling[f"{root}{ROOT_SEP}{dim}"] = ufactor
