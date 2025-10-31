@@ -76,7 +76,6 @@ def main():
 
         compiler_args = {
             "mlir_install_dir": args.llvm_dir,
-            "to_disassemble": graph_backend.payload_name,
             "print_source_ir": print_source,
             "print_transformed_ir": args.print_transformed_ir,
             "print_lowered_ir": args.print_lowered_ir,
