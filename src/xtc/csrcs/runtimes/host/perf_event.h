@@ -28,7 +28,8 @@ typedef struct {
 typedef enum {
     PERF_ARG_INVALID = -1,
     PERF_ARG_GENERIC,
-    PERF_ARG_PTR
+    PERF_ARG_PTR,
+    PERF_ARG_GPU
 } perf_event_arg_mode_t;
 
 typedef struct {
@@ -38,6 +39,11 @@ typedef struct {
         const void* config_ptr;
     } args;
 } perf_event_args_t;
+
+typedef enum {
+  PERF_EVENT_CLOSE = -1,
+  PERF_EVENT_GPU = -2
+} perf_event_fd_t;
 
 extern int all_perf_events[PERF_EVENT_NUM];
 extern int open_perf_event(perf_event_args_t event);
