@@ -95,6 +95,11 @@ def mulall(args: list[int]) -> int:
     return reduce(operator.mul, args, 1)
 
 
+def pow2divisor(value: int) -> int:
+    """Returns the largest power of 2 which divides value"""
+    return value & -value
+
+
 def estimate_unique_num_chao1(
     unique_num: int,
     once_num: int,

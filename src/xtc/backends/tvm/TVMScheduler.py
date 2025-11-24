@@ -7,14 +7,285 @@ from typing_extensions import override
 from typing import TextIO, TypeAlias
 from io import StringIO
 import numpy as np
+from dataclasses import dataclass
+from copy import deepcopy
 
+from xtc.utils.math import pow2divisor
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
 import xtc.backends.tvm as backend
 import xtc.itf as itf
 
+from .TVMOps import TVMOperation
+
 # Actual backend Schedule implementation is a mapping
 # from op name to the TVM schedule string
 ScheduleImpl: TypeAlias = dict[str, str]
+
+
+@dataclass(frozen=True)
+class TVMPlainSchedule:
+    dims: list[str]
+    tiles: dict[str, dict[str, int]]
+    permutation: list[str]
+    parallelization: list[str]
+    unrolling: dict[str, int]
+    vectorization: list[str]
+    write_caches: list[str]
+    read_buffers: list[tuple[str, int, bool]]
+
+
+class TVMScheduleEmitter:
+    def __init__(
+        self,
+        op: TVMOperation,
+        obj_var: str = "obj",
+        sch_var: str = "sch",
+        outf: TextIO = sys.stdout,
+    ):
+        self._op = op
+        self._obj_var = obj_var
+        self._sch_var = sch_var
+        self._outf = outf
+
+    def _parallel_dims(self, sched: TVMPlainSchedule) -> list[str]:
+        op_dims = self._op.operator.dims()
+        return [sched.dims[op_dims.index(d)] for d in self._op.operator.dims("P")]
+
+    def _reduction_dims(self, sched: TVMPlainSchedule) -> list[str]:
+        op_dims = self._op.operator.dims()
+        return [sched.dims[op_dims.index(d)] for d in self._op.operator.dims("R")]
+
+    def _update_schedule_for_codegen(self, sch: TVMPlainSchedule) -> TVMPlainSchedule:
+        unrolling = sch.unrolling
+        vectorization = sch.vectorization
+        adjusted_tiles = {}
+        adjusted_unrolling = {
+            k: v for k, v in sch.unrolling.items() if k not in vectorization
+        }
+        adjusted_unrolls = list(adjusted_unrolling)
+        adjusted_vectorization = sch.vectorization[:]
+        adjusted_permutation = sch.permutation[:]
+        for dim, dim_tiles in sch.tiles.items():
+            adjusted_dim_tiles = {}
+            for axis, size in dim_tiles.items():
+                adjusted_dim_tiles.update({axis: size})
+                if axis in adjusted_unrolling:
+                    assert axis not in adjusted_vectorization
+                    unroll = unrolling[axis]
+                    if unroll < size:
+                        axis_idx = adjusted_unrolls.index(axis)
+                        new_axis = f"__u_{axis}"
+                        adjusted_dim_tiles.update({new_axis: unroll})
+                        del adjusted_unrolls[axis_idx]
+                        adjusted_unrolls.insert(axis_idx, new_axis)
+                        adjusted_unrolling.update({new_axis: unroll})
+                        adjusted_permutation.insert(
+                            adjusted_permutation.index(axis) + 1,
+                            new_axis,
+                        )
+                elif axis in adjusted_vectorization:
+                    pow2 = pow2divisor(size)
+                    unroll = size // pow2
+                    if unroll > 1:
+                        axis_idx = adjusted_vectorization.index(axis)
+                        new_axis = f"__v_{axis}"
+                        adjusted_dim_tiles.update({new_axis: pow2})
+                        del adjusted_vectorization[axis_idx]
+                        adjusted_vectorization.insert(axis_idx, new_axis)
+                        adjusted_unrolls.append(axis)
+                        adjusted_unrolling.update({axis: unroll})
+                        adjusted_permutation.insert(
+                            adjusted_permutation.index(axis) + 1,
+                            new_axis,
+                        )
+            adjusted_tiles[dim] = adjusted_dim_tiles
+        adjusted_unrolling = {u: adjusted_unrolling[u] for u in adjusted_unrolls}
+        adjusted = TVMPlainSchedule(
+            dims=deepcopy(sch.dims),
+            tiles=adjusted_tiles,
+            permutation=adjusted_permutation,
+            parallelization=deepcopy(sch.parallelization),
+            unrolling=adjusted_unrolling,
+            vectorization=adjusted_vectorization,
+            write_caches=deepcopy(sch.write_caches),
+            read_buffers=deepcopy(sch.read_buffers),
+        )
+        return adjusted
+
+    def _full_packs(self, sched: TVMPlainSchedule) -> dict[str, tuple[int, int, int]]:
+        def factor_offset(input_idx: int, pad: bool):
+            if not pad:
+                return 0, 0
+            input_spec = self._op.np_inputs_spec()[input_idx]
+            if len(input_spec["shape"]) < 2:
+                return 0, 0
+            # Assume for CPU common number of sets and line size for L1
+            # Except to minimize conflicts by setting the inner axis
+            # size to a factor of num_sets and adding +1
+            num_sets, line_size = 64, 64
+            elt_size = np.dtype(input_spec["dtype"]).itemsize
+            elts_per_line = line_size // elt_size
+            return elts_per_line * num_sets, elts_per_line
+
+        packs = {}
+        for axis, input_idx, pad in sched.read_buffers:
+            factor, offset = factor_offset(input_idx, pad)
+            packs[axis] = (input_idx, factor, offset)
+        return packs
+
+    def _full_tilings(self, sched: TVMPlainSchedule) -> dict[str, tuple[str, str, int]]:
+        order = sched.permutation
+        tiles = sched.tiles
+        tilings = {}
+        for dim, dim_tiles in tiles.items():
+            t_axes = list(dim_tiles.keys())
+            t_sizes = list(dim_tiles.values())
+            tilings[dim] = (dim, "", t_sizes[0])
+            for idx in range(1, len(dim_tiles)):
+                tilings[t_axes[idx]] = (dim, t_axes[idx - 1], t_sizes[idx])
+        tilings = {axis: tilings[axis] for axis in order}
+        return tilings
+
+    def _write_buffer_tiling(
+        self,
+        sched: TVMPlainSchedule,
+        axis: str,
+        tilings: dict[str, tuple[str, str, int]],
+    ) -> tuple[dict[str, tuple[str, str, int]], dict[str, tuple[str, str, int]]]:
+        child = {
+            parent: (dim, axis, factor)
+            for axis, (dim, parent, factor) in tilings.items()
+        }
+        tiles_axis = list(tilings)
+        tile_idx = tiles_axis.index(axis)
+        outer_tiles = dict(list(tilings.items())[: tile_idx + 1])
+        inner_tiles = dict(list(tilings.items())[tile_idx + 1 :])
+        outers_dims = set()
+        for axis, (dim, parent, factor) in list(outer_tiles.items()):
+            outers_dims.add(dim)
+            factor = child.get(axis, ("", "", 1))[2]
+            outer_tiles[f"{dim}_"] = (dim, axis, factor)
+        dims = set()
+        parallel_dims = self._parallel_dims(sched)
+        for axis, (dim, parent, factor) in list(inner_tiles.items()):
+            if outers_dims and dim not in outers_dims:
+                outers_dims.add(dim)
+                if dim in parallel_dims:
+                    outer_tiles[f"{dim}_"] = (dim, dim, 0)
+            if dim not in dims:
+                dims.add(dim)
+                parent = ""
+            inner_tiles[axis] = (dim, parent, factor)
+        return outer_tiles, inner_tiles
+
+    def _full_write_buffers(
+        self, sched: TVMPlainSchedule
+    ) -> dict[tuple[str, str, str], dict[str, tuple[str, str, int]]]:
+        tilings = self._full_tilings(sched)
+        reorder_idx = {axis: idx for idx, axis in enumerate(tilings)}
+        write_axis = sorted(sched.write_caches, key=lambda axis: reorder_idx[axis])
+        buffer_tilings = {}
+        out = ("O", "", "")
+        tiling = tilings
+        for idx, axis in enumerate(write_axis):
+            outer_tiling, inner_tiling = self._write_buffer_tiling(sched, axis, tiling)
+            buffer_tilings[out] = outer_tiling
+            out = (f"O_W{idx}", out[0], axis)
+            tiling = inner_tiling
+        buffer_tilings[out] = tiling
+        return buffer_tilings
+
+    def _emit_assign_axis(
+        self, sched: TVMPlainSchedule, sch: str, tens: str, outf: TextIO
+    ) -> None:
+        parallel_dims = self._parallel_dims(sched)
+        reduction_dims = self._reduction_dims(sched)
+        if parallel_dims:
+            print(f"{', '.join(parallel_dims)}, = {tens}.op.axis", file=outf)
+        if reduction_dims:
+            print(f"{', '.join(reduction_dims)}, = {tens}.op.reduce_axis", file=outf)
+
+    def _emit_assign_tilings(
+        self,
+        sched: TVMPlainSchedule,
+        sch: str,
+        tens: str,
+        tilings: dict[str, tuple[str, str, int]],
+        outf: TextIO,
+    ) -> None:
+        for axis, (dim, parent, factor) in tilings.items():
+            if not parent:
+                if axis != dim:
+                    print(f"{axis} = {dim}", file=outf)
+                continue
+            if factor > 0:
+                print(
+                    f"{parent}, {axis} = {sch}[{tens}].split({parent}, factor={factor})",
+                    file=outf,
+                )
+            else:
+                print(f"{axis} = {parent}", file=outf)
+        print(f"{sch}[{tens}].reorder({', '.join(tilings)})", file=outf)
+
+    def _dump_schedule(self, sched: TVMPlainSchedule):
+        tilings = self._full_write_buffers(sched)
+        packings = self._full_packs(sched)
+        obj = self._obj_var
+        sch = self._sch_var
+        outf = self._outf
+        if packings:
+            print(f"INPS = list({obj}.values())[:-1]", file=outf)
+        for (tens, parent, axis), tiles in tilings.items():
+            if not parent:
+                print(f"{tens} = {obj}['{self._op.name}']", file=outf)
+            else:
+                print(f'{tens} = {sch}.cache_write({parent}, "local")', file=outf)
+            for tile_axis in tiles:
+                if tile_axis in packings:
+                    inp_idx, _, _ = packings[tile_axis]
+                    print(
+                        f'I_R{inp_idx} = {sch}.cache_read(INPS[{inp_idx}], "local", [{tens}])',
+                        file=outf,
+                    )
+        for idx, ((tens, parent, axis), tiles) in enumerate(tilings.items()):
+            if parent:
+                print(f"{sch}[{tens}].compute_at({sch}[{parent}], {axis})", file=outf)
+            self._emit_assign_axis(sched, sch, tens, outf)
+            self._emit_assign_tilings(sched, sch, tens, tiles, outf)
+            for tile_axis in tiles:
+                if tile_axis in packings:
+                    inp_idx, factor, offset = packings[tile_axis]
+                    print(
+                        f"{sch}[I_R{inp_idx}].compute_at({sch}[{tens}], {tile_axis})",
+                        file=outf,
+                    )
+                    if factor != 0:
+                        print(
+                            f"{sch}[I_R{inp_idx}].storage_align(I_R{inp_idx}.op.axis[-2], factor={factor}, offset={offset})",
+                            file=outf,
+                        )
+            for u_axis in sched.unrolling:
+                if u_axis in tiles:
+                    print(f"{sch}[{tens}].unroll({u_axis})", file=outf)
+            for v_axis in sched.vectorization:
+                if v_axis in tiles:
+                    print(f"{sch}[{tens}].vectorize({v_axis})", file=outf)
+            if sched.parallelization:
+                if sched.parallelization[0] in tiles:
+                    if len(sched.parallelization) > 1:
+                        print(
+                            f"{sched.parallelization[-1]} = {sch}[{tens}].fuse({', '.join(sched.parallelization)})",
+                            file=outf,
+                        )
+                    print(
+                        f"{sch}[{tens}].parallel({sched.parallelization[-1]})",
+                        file=outf,
+                    )
+
+    def emit(self, sched: TVMPlainSchedule):
+        # First adjust schedule to fix code gen limitations before emit
+        sched = self._update_schedule_for_codegen(sched)
+        self._dump_schedule(sched)
 
 
 class TVMScheduler(itf.schd.Scheduler):
@@ -72,7 +343,9 @@ class TVMScheduler(itf.schd.Scheduler):
     @override
     def schedule(self) -> itf.schd.Schedule:
         io = StringIO()
-        self._dump_tvm_schedule(outf=io)
+        emitter = TVMScheduleEmitter(op=self._op, outf=io)
+        schedule = self._get_plain_schedule()
+        emitter.emit(schedule)
         sched = io.getvalue()
         assert self._op.name is not None
         schedule_impl = {self._op.name: sched}
@@ -165,213 +438,21 @@ class TVMScheduler(itf.schd.Scheduler):
             assert unroll > 0, f"unroll < 1 not supported for axis {axis}"
         self.unrolling = unrolls
 
-    def _full_packs(self) -> dict[str, tuple[int, int, int]]:
-        def factor_offset(input_idx: int, pad: bool):
-            if not pad:
-                return 0, 0
-            input_spec = self._op.np_inputs_spec()[input_idx]
-            if len(input_spec["shape"]) < 2:
-                return 0, 0
-            # Assume for CPU common number of sets and line size for L1
-            # Except to minimize conflicts by setting the inner axis
-            # size to a factor of num_sets and adding +1
-            num_sets, line_size = 64, 64
-            elt_size = np.dtype(input_spec["dtype"]).itemsize
-            elts_per_line = line_size // elt_size
-            return elts_per_line * num_sets, elts_per_line
-
-        packs = {}
-        for axis, input_idx, pad in self.read_buffers:
-            factor, offset = factor_offset(input_idx, pad)
-            packs[axis] = (input_idx, factor, offset)
-        return packs
-
-    def _full_order(self) -> list[str]:
-        tiles_sizes = self._working_dims
-        permutation = self.permutation
-        unrolling = self.unrolling
-        permutation_with_unrolls = []
-        for axis in permutation:
-            permutation_with_unrolls.append(axis)
-            if axis in unrolling:
-                if unrolling[axis] < tiles_sizes[axis]:
-                    permutation_with_unrolls.append(f"__u_{axis}")
-        return permutation_with_unrolls
-
-    def _full_tiles(self) -> dict[str, dict[str, int]]:
-        unrolling = self.unrolling
-        tiles_with_unroll = {}
-        for dim, dim_tiles in self.tiles.items():
-            dim_tiles_with_unroll = {}
-            for axis, size in dim_tiles.items():
-                dim_tiles_with_unroll.update({axis: size})
-                if axis in unrolling:
-                    if unrolling[axis] < size:
-                        dim_tiles_with_unroll.update({f"__u_{axis}": unrolling[axis]})
-            tiles_with_unroll[dim] = dim_tiles_with_unroll
-        return tiles_with_unroll
-
-    def _full_tilings(self) -> dict[str, tuple[str, str, int]]:
-        order = self._full_order()
-        tiles = self._full_tiles()
-        tilings = {}
-        for dim, dim_tiles in tiles.items():
-            t_axes = list(dim_tiles.keys())
-            t_sizes = list(dim_tiles.values())
-            tilings[dim] = (dim, "", t_sizes[0])
-            for idx in range(1, len(dim_tiles)):
-                tilings[t_axes[idx]] = (dim, t_axes[idx - 1], t_sizes[idx])
-        tilings = {axis: tilings[axis] for axis in order}
-        return tilings
-
-    def _write_buffer_tiling(
-        self, axis: str, tilings: dict[str, tuple[str, str, int]]
-    ) -> tuple[dict[str, tuple[str, str, int]], dict[str, tuple[str, str, int]]]:
-        child = {
-            parent: (dim, axis, factor)
-            for axis, (dim, parent, factor) in tilings.items()
-        }
-        tiles_axis = list(tilings)
-        tile_idx = tiles_axis.index(axis)
-        outer_tiles = dict(list(tilings.items())[: tile_idx + 1])
-        inner_tiles = dict(list(tilings.items())[tile_idx + 1 :])
-        outers_dims = set()
-        for axis, (dim, parent, factor) in list(outer_tiles.items()):
-            outers_dims.add(dim)
-            factor = child.get(axis, ("", "", 1))[2]
-            outer_tiles[f"{dim}_"] = (dim, axis, factor)
-        dims = set()
-        for axis, (dim, parent, factor) in list(inner_tiles.items()):
-            if outers_dims and dim not in outers_dims:
-                outers_dims.add(dim)
-                if dim in self.parallel_dims:
-                    outer_tiles[f"{dim}_"] = (dim, dim, 0)
-            if dim not in dims:
-                dims.add(dim)
-                parent = ""
-            inner_tiles[axis] = (dim, parent, factor)
-        return outer_tiles, inner_tiles
-
-    def _full_write_buffers(
-        self,
-    ) -> dict[tuple[str, str, str], dict[str, tuple[str, str, int]]]:
-        tilings = self._full_tilings()
-        reorder_idx = {axis: idx for idx, axis in enumerate(tilings)}
-        write_axis = sorted(self.write_caches, key=lambda axis: reorder_idx[axis])
-        buffer_tilings = {}
-        out = ("O", "", "")
-        tiling = tilings
-        for idx, axis in enumerate(write_axis):
-            outer_tiling, inner_tiling = self._write_buffer_tiling(axis, tiling)
-            buffer_tilings[out] = outer_tiling
-            out = (f"O_W{idx}", out[0], axis)
-            tiling = inner_tiling
-        buffer_tilings[out] = tiling
-        return buffer_tilings
-
-    def _emit_assign_axis(self, sch: str, tens: str, outf: TextIO) -> None:
-        if self.parallel_dims:
-            print(f"{', '.join(self.parallel_dims)}, = {tens}.op.axis", file=outf)
-        if self.reduction_dims:
-            print(
-                f"{', '.join(self.reduction_dims)}, = {tens}.op.reduce_axis", file=outf
-            )
-
-    def _emit_assign_tilings(
-        self,
-        sch: str,
-        tens: str,
-        tilings: dict[str, tuple[str, str, int]],
-        outf: TextIO,
-    ) -> None:
-        for axis, (dim, parent, factor) in tilings.items():
-            if not parent:
-                if axis != dim:
-                    print(f"{axis} = {dim}", file=outf)
-                continue
-            if factor > 0:
-                print(
-                    f"{parent}, {axis} = {sch}[{tens}].split({parent}, factor={factor})",
-                    file=outf,
-                )
-            else:
-                print(f"{axis} = {parent}", file=outf)
-        print(f"{sch}[{tens}].reorder({', '.join(tilings)})", file=outf)
-
-    def _dump_tvm_schedule(
-        self, obj: str = "obj", sch: str = "sch", outf: TextIO = sys.stdout
-    ):
-        tilings = self._full_write_buffers()
-        packings = self._full_packs()
-        if packings:
-            print(f"INPS = list({obj}.values())[:-1]", file=outf)
-        for (tens, parent, axis), tiles in tilings.items():
-            if not parent:
-                print(f"{tens} = {obj}['{self._op.name}']", file=outf)
-            else:
-                print(f'{tens} = {sch}.cache_write({parent}, "local")', file=outf)
-            for tile_axis in tiles:
-                if tile_axis in packings:
-                    inp_idx, _, _ = packings[tile_axis]
-                    print(
-                        f'I_R{inp_idx} = {sch}.cache_read(INPS[{inp_idx}], "local", [{tens}])',
-                        file=outf,
-                    )
-        for idx, ((tens, parent, axis), tiles) in enumerate(tilings.items()):
-            if parent:
-                print(f"{sch}[{tens}].compute_at({sch}[{parent}], {axis})", file=outf)
-            self._emit_assign_axis(sch, tens, outf)
-            self._emit_assign_tilings(sch, tens, tiles, outf)
-            for tile_axis in tiles:
-                if tile_axis in packings:
-                    inp_idx, factor, offset = packings[tile_axis]
-                    print(
-                        f"{sch}[I_R{inp_idx}].compute_at({sch}[{tens}], {tile_axis})",
-                        file=outf,
-                    )
-                    if factor != 0:
-                        print(
-                            f"{sch}[I_R{inp_idx}].storage_align(I_R{inp_idx}.op.axis[-2], factor={factor}, offset={offset})",
-                            file=outf,
-                        )
-            for axis, unroll in self.unrolling.items():
-                for u_axis in [f"__u_{axis}", axis]:
-                    if u_axis in tiles:
-                        print(f"{sch}[{tens}].unroll({u_axis})", file=outf)
-                        break
-            for axis in self.vectorization:
-                if axis in tiles:
-                    print(f"{sch}[{tens}].vectorize({axis})", file=outf)
-            if self.parallelization:
-                if self.parallelization[0] in tiles:
-                    if len(self.parallelization) > 1:
-                        print(
-                            f"{self.parallelization[-1]} = {sch}[{tens}].fuse({', '.join(self.parallelization)})",
-                            file=outf,
-                        )
-                    print(
-                        f"{sch}[{tens}].parallel({self.parallelization[-1]})", file=outf
-                    )
-
-    def dump_schedule(self, obj: str | None = None, outf: TextIO = sys.stdout):
-        if obj is None:
-            obj = "sch"
-        for dim, tiles in self.tiles.items():
-            t_tiles = {k: v for i, (k, v) in enumerate(tiles.items()) if i >= 1}
-            print(f"{obj}.tile('{dim}', {t_tiles})", file=outf)
-        print(f"{obj}.interchange({self.permutation})", file=outf)
-        print(f"{obj}.vectorize({self.vectorization})", file=outf)
-        print(f"{obj}.unroll({self.unrolling})", file=outf)
-        print(f"{obj}.parallelize({self.parallelization})", file=outf)
-
-    def get_schedule_str(self, obj: str | None = None) -> str:
-        io = StringIO()
-        self.dump_schedule(outf=io)
-        return io.getvalue()
+    def _get_plain_schedule(self) -> TVMPlainSchedule:
+        return TVMPlainSchedule(
+            dims=deepcopy(self.dims),
+            tiles=self.tiles,
+            permutation=self.permutation,
+            parallelization=deepcopy(self.parallelization),
+            unrolling=self.unrolling,
+            vectorization=self.vectorization,
+            write_caches=deepcopy(self.write_caches),
+            read_buffers=deepcopy(self.read_buffers),
+        )
 
     @override
     def __str__(self) -> str:
-        return self.get_schedule_str()
+        return str(self._get_plain_schedule())
 
 
 class TVMSchedule(itf.schd.Schedule):

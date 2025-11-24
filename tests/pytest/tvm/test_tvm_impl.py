@@ -6,6 +6,7 @@ MATMUL_ARGS = (I, J, K, DTYPE)
 
 def sched_nop(sch):
     # Expected in TVM schedule
+    print(sch)
     return [
         "reorder(i, j, k)"
     ]
@@ -15,6 +16,7 @@ def sched_tile2(sch):
     sch.tile("j", {"j1": 64, "j2": 64})
     sch.tile("k", {"k1": 13})
     # Expected in TVM schedule
+    print(sch)
     return [
         "reorder(i, j, k, i1, j1, k1, i2, j2)",
         "split(j, factor=64)",
@@ -30,9 +32,9 @@ def sched_tile2p(sch):
     sch.unroll({"j2": 64, "k1": 13, "i2": 4})
     sch.vectorize(["j2"])
     # Expected in TVM schedule
+    print(sch)
     return [
         "reorder(i, i1, j, k, j1, k1, i2, j2)",
-        "unroll(j2)",
         "vectorize(j2)",
         "fuse(i, i1)",
         "parallel(i1)",
@@ -48,6 +50,7 @@ def sched_tile3wc(sch):
     sch.vectorize(["j3"])
     sch.buffer_at("j")
     sch.buffer_at("j1")
+    print(sch)
     # Expected in TVM schedule
     return [
         "sch[O].reorder(i, j, i_, j_)",
@@ -57,20 +60,27 @@ def sched_tile3wc(sch):
         "sch[O_W1].reorder(k, i2, j2, k1, i3, j3)",
     ]
 
-def check_self_sched(impl, sch):
-    schedule_str = sch.get_schedule_str()
-    print(f"Schedule str: {schedule_str}")
-    sch2 = impl.get_scheduler()
-    exec(schedule_str, {"sch": sch2}, {})
-    schedule_str2 = sch2.get_schedule_str()
-    assert schedule_str == schedule_str2
+def sched_tile_unroll_vec(sch):
+    sch.tile("i", {"i1": 8})
+    sch.tile("j", {"j1": 48})
+    sch.tile("k", {"k1": 50})
+    sch.interchange(["j", "k", "i", "k1", "i1", "j1"])
+    sch.parallelize(["j"])
+    sch.unroll({"k1": 32, "i1": 8})
+    sch.vectorize(["j1"])
+    print(sch)
+    # Expected in TVM schedule
+    return [
+        "sch[O].reorder(j, k, i, k1, __u_k1, i1, j1, __v_j1)",
+        "sch[O].unroll(__u_k1)",
+        "sch[O].unroll(i1)",
+        "sch[O].unroll(j1)",
+        "sch[O].vectorize(__v_j1)",
+    ]
 
 def check_schedule(impl, sched_func):
     sch = impl.get_scheduler()
     expected = sched_func(sch)
-    check_self_sched(impl, sch)
-    schedule_str = sch.get_schedule_str()
-    print(f"Schedule:\n{schedule_str}")
     schedule = sch.schedule()
     schedule_str = str(schedule)
     print(f"TVM schedule:\n{schedule_str}")
@@ -109,4 +119,11 @@ def test_sched_tile3wc():
     impl = matmul_impl(*MATMUL_ARGS, "matmul")
     print(impl.graph)
     schedule = check_schedule(impl, sched_tile3wc)
+    check_evaluate(impl, schedule)
+
+@requires_tvm
+def test_sched_tile_unroll_vec():
+    impl = matmul_impl(*MATMUL_ARGS, "matmul")
+    print(impl.graph)
+    schedule = check_schedule(impl, sched_tile_unroll_vec)
     check_evaluate(impl, schedule)
