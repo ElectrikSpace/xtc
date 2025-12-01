@@ -67,7 +67,7 @@ Compile MLIR/CLANG and the MLIR python bindings, for instance:
     pip install -r mlir/python/requirements.txt
     mkdir build
     cd build
-    cmake -DLLVM_ENABLE_PROJECTS="clang;mlir"
+    cmake -DLLVM_ENABLE_PROJECTS="clang;mlir" \
     -DCMAKE_INSTALL_PREFIX=$HOME/install/llvm \
     -DCMAKE_BUILD_TYPE=Release \
     -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
