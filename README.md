@@ -23,6 +23,12 @@ Ensure installation of minimal required dependencies on the distribution (here f
     sudo apt install python3 python3-dev build-essential libomp5 binutils binutils-aarch64-linux-gnu binutils-x86-64-linux-gnu
     sudo apt install libpfm4-dev  # Optionally if using PMU counters on CPU for evaluation
 
+Or for Fedora
+
+    sudo dnf install python3 python3-devel libomp binutils binutils-aarch64-linux-gnu binutils-x86_64-linux-gnu
+    sudo dnf group install c-development development-tools # For Fedora 40+
+    sudo dnf install libpfm-devel
+
 Ensure python version >=3.10 and <3.13.
 
 Install virtual environment, for instance:
