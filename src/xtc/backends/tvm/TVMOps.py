@@ -474,11 +474,12 @@ class TVMOperatorRelu(TVMOperator):
         shape = tuple(A.shape)
         size = mulall(A.shape)
         newshape = (size,)
+        O = A
         if shape != newshape:
-            A = topi.reshape(A, newshape=(size,))
+            O = topi.reshape(A, newshape=(size,))
         O = te.compute(
             (Ki,),
-            lambda i,: tvm.tir.max(self.attrs["threshold"], A[i]),
+            lambda i,: tvm.tir.max(self.attrs["threshold"], O[i]),
             name=self.name,
         )
         if shape != newshape:
