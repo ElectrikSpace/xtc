@@ -9,12 +9,18 @@ help:
 	@echo "    make check-lit-c   # run all lit checks for C target"
 	@echo "    make check-pytest  # run all pytest tests"
 	@echo "    make check-banwords # run banned words checks"
+	@echo "  make format          # apply formatting (warning: change files in place)"
+	@echo "    make format-license # add licenses"
+	@echo "    make format-ruff   # format python files with ruff"
 	@echo
+
 
 test:
 	pytest tests/pytest/unit tests/pytest/mlir tests/pytest/tvm tests/pytest/jir
 
 check: check-format check-banwords check-type check-lit-all check-pytest
+
+format: format-license format-ruff
 
 check-format: check-format-ruff check-license
 
@@ -48,5 +54,11 @@ check-lit-c:
 check-pytest:
 	scripts/pytest/run_pytest.sh -v
 
-.PHONY: help test check check-lit-all check-lit check-lit-c check-pytest check-type check-pyright check-mypy check-format check-format-ruff check-license check-banwords
+format-ruff:
+	ruff format
+
+format-license:
+	scripts/licensing/licensing.py --apply
+
+.PHONY: help test check check-lit-all check-lit check-lit-c check-pytest check-type check-pyright check-mypy check-format check-format-ruff check-license check-banwords format format-ruff format-license
 .SUFFIXES:
