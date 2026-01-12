@@ -10,7 +10,7 @@ a = O.tensor((N, H, W, C), dtype, name="I")
 b = O.tensor((R, S, C, F), dtype, name="W")
 
 with O.graph(name="pad_conv2d_nhwc_mini") as gb:
-    p = O.pad2d(a, padding=2, axis=(1, 2), name="pad")
+    p = O.pad(a, padding={1: 2, 2: (2, 2)}, name="pad")
     O.conv2d(p, b, stride=(SH, SW), name="conv")
 
 graph = gb.graph
@@ -23,7 +23,7 @@ sched = sch.schedule()
 
 comp = impl.get_compiler(
     shared_lib=True,
-    dump_file="pad_conv2d_nhwc_mini_tvm",
+    dump_file="pad_dict_conv2d_nhwc_mini_tvm",
     print_source_ir=True,
     print_transformed_ir=True,
 )
@@ -39,7 +39,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:    outputs:
 # CHECK-NEXT:    - %3 : 1x4x4x16xfloat32
 # CHECK-NEXT:    nodes:
-# CHECK-NEXT:    - %2: pad2d(%0, padding=(2, 2, 2, 2), axis=(1, 2), constant_value=0) {name = 'pad'} : [1x8x8x3xfloat32] -> [1x12x12x3xfloat32]
+# CHECK-NEXT:    - %2: pad(%0, padding={1: (2, 2), 2: (2, 2)}, constant_value=0) {name = 'pad'} : [1x8x8x3xfloat32] -> [1x12x12x3xfloat32] 
 # CHECK-NEXT:    - %3: conv2d(%2, %1, stride=(2, 2)) {name = 'conv'} : [1x12x12x3xfloat32, 5x5x3x16xfloat32] -> [1x4x4x16xfloat32]
 # CHECK-NEXT:  
 # CHECK-NEXT:  # from tvm.script import ir as I

@@ -9,8 +9,8 @@ a = O.tensor((I, K), dtype, name="A")
 b = O.tensor((K, J), dtype, name="B")
 
 with O.graph(name="pad_matmul_unpad") as gb:
-    p1 = O.pad2d(a, padding=(0, 2), name="A_pad")
-    p2 = O.pad2d(b, padding=(0, 2), name="B_pad")
+    p1 = O.pad(a, padding=(0, 2), name="A_pad")
+    p2 = O.pad(b, padding=(0, 2), name="B_pad")
     m_pad = O.matmul(p1, p2, name="matmul_padded")
     O.unpad2d(m_pad, padding=(0, 2), name="C")
 graph = gb.graph
@@ -22,7 +22,7 @@ sched = sch.schedule()
 
 comp = impl.get_compiler(
     shared_lib=True,
-    dump_file="pad_matmul_unpad_tvm",
+    dump_file="pad_tuple_matmul_unpad_tvm",
     print_source_ir=True,
     print_transformed_ir=True,
 )
@@ -39,10 +39,10 @@ print(f"CODE: {res}")
 # CHECK-NEXT:    outputs:
 # CHECK-NEXT:    - %5 : 14x14xfloat32
 # CHECK-NEXT:    nodes:
-# CHECK-NEXT:    - %2: pad2d(%0, padding=(0, 2, 0, 2), axis=(-2, -1), constant_value=0) {name = 'A_pad'} : [14x14xfloat32] -> [16x16xfloat32]
-# CHECK-NEXT:    - %3: pad2d(%1, padding=(0, 2, 0, 2), axis=(-2, -1), constant_value=0) {name = 'B_pad'} : [14x14xfloat32] -> [16x16xfloat32]
+# CHECK-NEXT:    - %2: pad(%0, padding=(0, 2), constant_value=0) {name = 'A_pad'} : [14x14xfloat32] -> [16x16xfloat32]
+# CHECK-NEXT:    - %3: pad(%1, padding=(0, 2), constant_value=0) {name = 'B_pad'} : [14x14xfloat32] -> [16x16xfloat32]
 # CHECK-NEXT:    - %4: matmul(%2, %3) {name = 'matmul_padded'} : [16x16xfloat32, 16x16xfloat32] -> [16x16xfloat32]
-# CHECK-NEXT:    - %5: unpad2d(%4, padding=(0, 2, 0, 2), axis=(-2, -1)) {name = 'C'} : [16x16xfloat32] -> [14x14xfloat32]
+# CHECK-NEXT:    - %5: unpad2d(%4, padding=(0, 2, 0, 2), axes=(-2, -1)) {name = 'C'} : [16x16xfloat32] -> [14x14xfloat32]
 # CHECK-NEXT:  
 # CHECK-NEXT:  # from tvm.script import ir as I
 # CHECK-NEXT:  # from tvm.script import tir as T

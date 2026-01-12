@@ -10,7 +10,7 @@ a = O.tensor((N, H, W, C), dtype, name="I")
 b = O.tensor((R, S, C, F), dtype, name="W")
 
 with O.graph(name="pad_conv2d_nhwc_mini") as gb:
-    p = O.pad2d(a, padding=2, axis=(1, 2), constant_value=3, name="pad")
+    p = O.pad(a, padding=(0, 2, (2, 2), 0), name="pad")
     O.conv2d(p, b, stride=(SH, SW), name="conv")
 
 graph = gb.graph
@@ -23,7 +23,7 @@ sched = sch.schedule()
 
 comp = impl.get_compiler(
     shared_lib=True,
-    dump_file="constant_pad_conv2d_nhwc_mini_mlir",
+    dump_file="pad_tuple_conv2d_nhwc_mini_mlir",
     print_source_ir=True,
     print_transformed_ir=True,
 )
@@ -38,7 +38,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:  module attributes {transform.with_named_sequence} {
 # CHECK-NEXT:    func.func @pad_conv2d_nhwc_mini(%arg0: memref<1x8x8x3xf32> {llvm.noalias}, %arg1: memref<5x5x3x16xf32> {llvm.noalias}, %arg2: memref<1x4x4x16xf32> {llvm.noalias}) {
 # CHECK-NEXT:      %alloca = memref.alloca() {alignment = 256 : i64} : memref<1x12x12x3xf32>
-# CHECK-NEXT:      %cst = arith.constant 3.000000e+00 : f32
+# CHECK-NEXT:      %cst = arith.constant 0.000000e+00 : f32
 # CHECK-NEXT:      linalg.fill {__xtc_id_pad_0_} ins(%cst : f32) outs(%alloca : memref<1x12x12x3xf32>)
 # CHECK-NEXT:      %subview = memref.subview %alloca[0, 2, 2, 0] [1, 8, 8, 3] [1, 1, 1, 1] : memref<1x12x12x3xf32> to memref<1x8x8x3xf32, strided<[432, 36, 3, 1], offset: 78>>
 # CHECK-NEXT:      linalg.copy {__xtc_id_pad_} ins(%arg0 : memref<1x8x8x3xf32>) outs(%subview : memref<1x8x8x3xf32, strided<[432, 36, 3, 1], offset: 78>>)
@@ -111,7 +111,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:  module attributes {transform.with_named_sequence} {
 # CHECK-NEXT:    func.func @pad_conv2d_nhwc_mini(%arg0: memref<1x8x8x3xf32> {llvm.noalias}, %arg1: memref<5x5x3x16xf32> {llvm.noalias}, %arg2: memref<1x4x4x16xf32> {llvm.noalias}) {
 # CHECK-NEXT:      %alloca = memref.alloca() {alignment = 256 : i64} : memref<1x12x12x3xf32>
-# CHECK-NEXT:      %cst = arith.constant 3.000000e+00 : f32
+# CHECK-NEXT:      %cst = arith.constant 0.000000e+00 : f32
 # CHECK-NEXT:      %c0 = arith.constant 0 : index
 # CHECK-NEXT:      %c1 = arith.constant 1 : index
 # CHECK-NEXT:      %c1_0 = arith.constant 1 : index
@@ -269,7 +269,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:    outputs:
 # CHECK-NEXT:    - %3 : 1x4x4x16xfloat32
 # CHECK-NEXT:    nodes:
-# CHECK-NEXT:    - %2: pad2d(%0, padding=(2, 2, 2, 2), axis=(1, 2), constant_value=3) {name = 'pad'} : [1x8x8x3xfloat32] -> [1x12x12x3xfloat32]
+# CHECK-NEXT:    - %2: pad(%0, padding={-4: (0, 0), -3: (2, 2), -2: (2, 2), -1: (0, 0)}, constant_value=0) {name = 'pad'} : [1x8x8x3xfloat32] -> [1x12x12x3xfloat32]
 # CHECK-NEXT:    - %3: conv2d(%2, %1, stride=(2, 2)) {name = 'conv'} : [1x12x12x3xfloat32, 5x5x3x16xfloat32] -> [1x4x4x16xfloat32]
 # CHECK-NEXT:  
 # CHECK-NEXT:  CODE: 0
