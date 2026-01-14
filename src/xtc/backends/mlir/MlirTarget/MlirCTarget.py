@@ -34,7 +34,8 @@ from xtc.itf.graph import Graph
 from .MlirTarget import MlirTarget
 from ..MlirConfig import MlirConfig
 from ..MlirProgram import RawMlirProgram
-from ..MlirCompilerPasses import MlirProgramToStdDialectsPass
+
+from mlir.passmanager import PassManager
 
 __all__ = ["MlirCTarget"]
 
@@ -245,3 +246,43 @@ class MlirCTarget(MlirTarget):
         else:
             result = subprocess.run(cmd, text=True)
         return result
+
+
+class MlirProgramToStdDialectsPass:
+    def __init__(
+        self,
+        mlir_program: RawMlirProgram,
+    ) -> None:
+        self._mlir_program = mlir_program
+
+    def _lowering_pipeline(self) -> list[str]:
+        return [
+            "canonicalize",
+            "cse",
+            "sccp",
+            # From complex control to the soup of basic blocks
+            "expand-strided-metadata",
+            "convert-linalg-to-loops",
+            "lower-affine",
+            "convert-vector-to-scf{full-unroll=true}",
+            "scf-forall-to-parallel",
+            "convert-scf-to-openmp",
+            "canonicalize",
+            "cse",
+            "sccp",
+            # "convert-scf-to-cf",
+            "canonicalize",
+            "cse",
+            "sccp",
+            # Memory accesses
+            "buffer-results-to-out-params",
+            "canonicalize",
+            "cse",
+            "sccp",
+        ]
+
+    def run(self) -> None:
+        pm = PassManager(context=self._mlir_program.mlir_context)
+        for opt in self._lowering_pipeline():
+            pm.add(opt)  # type: ignore # no attribte add?
+        pm.run(self._mlir_program.mlir_module.operation)

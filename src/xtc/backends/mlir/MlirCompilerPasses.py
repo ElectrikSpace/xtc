@@ -26,11 +26,7 @@ from mlir.ir import (
 )
 from mlir.passmanager import PassManager
 
-from xtc.utils.ext_tools import (
-    transform_opts,
-    lowering_llvm_opts,
-    lowering_std_opts,
-)
+from xtc.utils.ext_tools import transform_opts
 
 from .MlirProgram import RawMlirProgram
 from .MlirScheduler import MlirSchedule, MlirNodeSchedule
@@ -445,31 +441,3 @@ class MlirProgramApplyTransformPass:
                 transform_op.erase()
             else:
                 break
-
-
-class MlirProgramToLLVMDialectPass:
-    def __init__(
-        self,
-        mlir_program: RawMlirProgram,
-    ) -> None:
-        self._mlir_program = mlir_program
-
-    def run(self) -> None:
-        pm = PassManager(context=self._mlir_program.mlir_context)
-        for opt in lowering_llvm_opts:
-            pm.add(opt)  # type: ignore # no attribte add?
-        pm.run(self._mlir_program.mlir_module.operation)
-
-
-class MlirProgramToStdDialectsPass:
-    def __init__(
-        self,
-        mlir_program: RawMlirProgram,
-    ) -> None:
-        self._mlir_program = mlir_program
-
-    def run(self) -> None:
-        pm = PassManager(context=self._mlir_program.mlir_context)
-        for opt in lowering_std_opts:
-            pm.add(opt)  # type: ignore # no attribte add?
-        pm.run(self._mlir_program.mlir_module.operation)
