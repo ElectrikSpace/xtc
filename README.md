@@ -1,243 +1,149 @@
+# XTC
+
+## Links
+
 ![logo.png](logo.png)
-
-# Overview
-
-XTC is a domain specific dataflow graph compiler featuring operational DSL, scheduling DSL, multiple backends and autotuning.
 
 Refer to documentation at https://corse.gitlabpages.inria.fr/XTC
 
 Refer to installable python packages at: https://gitlab.inria.fr/corse/xtc/-/packages
 
-Roadmap:
-+ Allow tensor-level specifications
-+ Implement graph-level transformations (fusion, etc.).
-+ Implement more node-level transformations (padding, packing, etc.).
-+ Integrate with an ML front-end.
+Refer to tutorials [here](docs/tutorials) and to additionnal developers documentation [here](docs/develop).
 
-# XTC Framework
+## Overview
 
-## Installation instructions
+XTC is a domain-specific dataflow graph compiler for linear algebra operations. It provides:
+- **Operational DSL**: Define computation graphs with tensors and operators
+- **Scheduling DSL**: High-level transformations (tiling, parallelization, vectorization, etc.)
+- **Multiple backends**: MLIR (linalg + transform), TVM (Tensor IR), JIR (INRIA internal)
+- **Autotuning**: Definition and exploration of the optimization space
 
-Ensure installation of minimal required dependencies on the distribution (here for deb like distributions):
+## Build & Development
 
-    sudo apt install python3 python3-dev build-essential libomp5 binutils binutils-aarch64-linux-gnu binutils-x86-64-linux-gnu
-    sudo apt install libpfm4-dev  # Optionally if using PMU counters on CPU for evaluation
+### System requirements
 
-Or for Fedora
+Debian-like distributions:
+```bash
+sudo apt install python3 python3-dev build-essential libomp5 binutils binutils-aarch64-linux-gnu binutils-x86-64-linux-gnu
 
-    sudo dnf install python3 python3-devel libomp binutils binutils-aarch64-linux-gnu binutils-x86_64-linux-gnu
-    sudo dnf group install c-development development-tools # For Fedora 40+
-    sudo dnf install libpfm-devel
+# Optionally if using PMU counters on CPU for evaluation
+sudo apt install libpfm4-dev 
+sudo sysctl kernel.perf_event_paranoid=1
+```
 
-Ensure python version >=3.10 and <3.13.
+Fedora:
+```bash
+sudo dnf install python3 python3-devel libomp binutils binutils-aarch64-linux-gnu binutils-x86_64-linux-gnu
 
-Install virtual environment, for instance:
+# For Fedora 40+
+sudo dnf group install c-development development-tools # For Fedora 40+
 
-    python3 -m venv .venv
-    source .venv/bin/activate
+# Optionally if using PMU counters on CPU for evaluation
+sudo dnf install libpfm-devel
+sudo sysctl kernel.perf_event_paranoid=1
+```
 
-Install the package for development/testing with:
+### Installation
 
-    pip3 install -e '.[dev]'
+**Python**: 3.10 to 3.14 inclusive
 
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip3 install -e '.[dev]'
+pip3 install -r mlir_requirements.txt  # Optional: MLIR backend
+pip3 install -r tvm_requirements.txt   # Optional: TVM backend
+make test                              # Run minimal unit tests
+```
 
-Then install the MLIR requirements and optionally TVM and JIT backend requirements
-as described below.
+### Code quality
 
-Note: in order to use PMU counters on CPU, install `libpfm4-dev` as described above and
-configure your system to access counters with: `sudo sysctl kernel.perf_event_paranoid=1`
+Code quality requirements:
+- **Type annotations**: Strict pyright mode, full annotations required
+- **Formatting**: Ruff (line length 88)
+- **License headers**: BSD-3-Clause required on all source files
+- All checks must pass before merge
 
-### MLIR Backend Requirements
+Type checking:
+```bash
+make check-type          # Run both pyright and mypy
+pyright                  # Run pyright only
+mypy                     # Run mypy only
+```
 
-For the MLIR backend, install the python packages for MLIR dependencies
-(maintained at https://gitlab.inria.fr/CORSE/mlir-bindings-wheels and https://gitlab.inria.fr/CORSE/xtc-mlir-bindings-wheels):
+Formatting:
+```bash
+make format              # Apply all formatting (license + ruff)
+make check-format        # Check formatting without modifying files
+```
 
-    pip3 install -r mlir_requirements.txt
+Testing structure:
+- `tests/pytest/unit/`: Core interface unit tests
+- `tests/pytest/{mlir,tvm}/`: Backend-specific tests
+- `tests/filecheck/`: Lit+FileCheck functional tests for code generation
 
+Global test commands:
+```bash
+make test                # Run minimal unit tests
+make check               # Run ALL acceptance tests (required for contributions)
+make check-pytest        # Run pytest suite only
+make check-lit           # Run LIT tests for LLVM IR target
+make check-lit-c         # Run LIT tests for C target
+pytest tests/pytest/unit # Run specific test directory
+```
 
-#### Optional MLIR development version
+Running individual tests:
+```bash
+# Single pytest file
+pytest tests/pytest/unit/test_specific.py -v
 
-Optionally, for using own MLIR development version, build the MLIR project as follow.
+# Single lit test
+lit -v tests/filecheck/backends/specific_test.py
 
-Ensure revision is compatible with the one specified iin `mlir-requirements.txt`.
+# C target for lit tests
+XTC_MLIR_TARGET=c lit -v tests/filecheck/backends/specific_test.py
+```
 
-Then execute, for instance:
+## Architecture
 
-    git clone git@github.com:llvm/llvm-project.git
-    cd llvm-project
-    git checkout v19.1.7
+### Core Abstractions (src/xtc/itf/)
 
-Compile MLIR/CLANG and the MLIR python bindings, for instance:
+Abstract interfaces defining the compilation pipeline:
+- `data/` - Tensor, DataType, ShapeType
+- `operator/` - Linear algebra operator interface
+- `graph/` - Graph, Node, Operation abstractions
+- `back/` - Backend interface
+- `schd/` - Scheduler and Schedule abstractions
+- `comp/` - Compiler interface
+- `exec/` - Executor and Evaluator interfaces
+- `search/` - Search space exploration interface
 
-    sudo apt install pybind11-dev libxml2-dev
-    pip install -r mlir/python/requirements.txt
-    mkdir build
-    cd build
-    cmake -DLLVM_ENABLE_PROJECTS="clang;mlir" \
-    -DCMAKE_INSTALL_PREFIX=$HOME/install/llvm \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-    -DLLVM_ENABLE_ASSERTIONS=ON \
-    ../llvm
-    make -j4
-    make install
+### Backends (src/xtc/backends/)
 
-Add the tools to your `PATH` and the python bindings to your `PYTHONPATH`:
+Exposed backends:
+- `mlir/` - MLIR backend using linalg + transform dialects
+- `tvm/` - TVM backend using Tensor IR + Schedule APIs
 
-    export PATH=$HOME/install/llvm/bin:$PATH
-    export PYTHONPATH=$HOME/install/llvm/python_packages/mlir_core:$PYTHONPATH
-
-Some features of XTC also require an out-of-tree project named XTC-MLIR.
-It is installed automatically using the mlir_requirements.txt file.
-For manual building and installation, please follow the README at https://gitlab.inria.fr/CORSE/xtc-mlir.
-Note: The prebuilt XTC-MLIR package comes with its own version of the libLLVM.so
-
-#### MLIR Targets
-
-XTC supports multiple MLIR Targets for the code generation:
+XTC also supports multiple MLIR Targets for the code generation:
   - llvmir (default)
   - c
 
 To force the use of a specific target, you can set the env variable XTC_MLIR_TARGET=<mlir-target>.
 
-### TVM backend requirements
+### Compilation Pipeline
 
-In order to use the tvm backend, install the python packages for TVM dependencies
-(maintained at https://gitlab.inria.fr/CORSE/tvm-wheels):
+1. User defines Graph with Tensors and Operators
+2. Backend created from Graph
+3. Scheduler applies transformations and produces Schedule
+4. Compiler generates executable Module
+5. Executor/Evaluator runs and measures performance
 
-    pip3 install -r tvm_requirements.txt
+### CLI Tools (src/xtc/cli/)
 
+- `mlir-loop` - High-level scheduling for MLIR linalg operators
+- `mlir-backend` - MLIR backend wrapper
+- `loop-explore` - Autotuning and space exploration
+- `loop-display` - Visualization of exploration results
 
-Note that, if compiling TVM v0.16+ from source instead of using these packages,
-one should first apply the patch `patches/tvm-Bugfix-TIR-Fix-race-on-ComputationCache.patch`
-which fix a race condition in TVM. This patch is included in the python package above.
+## AI assistants
 
-### JIR backend requirements
-
-In order to use the jir backend, install the python packages for JIR dependencies:
-
-    pip3 install -r jir_requirements.txt
-
-Note that JIR is currently an Inria internal project, in order to get access to the package
-repository, put the following in yout `~/.netrc` file:
-
-    machine gitlab.inria.fr login <gitlab_login> password <gitlab_token>
-
-In order to get a gitlab token, get to https://gitlab.inria.fr/-/user_settings/personal_access_tokens
-and add a new token with the `api` scope.
-
-Optionally, one can use an alternative JIR build, refer to
-https://gitlab.inria.fr/CORSE/jir for building JIR and dependent tools from sources.
-
-## Test Installation
-
-Validate installation by launching minimal sanity tests with:
-
-    make test
-
-## Contributing
-
-For contributions to XTC, one should run the `check` target which runs all acceptance tests:
-
-    make check
-
-Refer to the `Makefile` targets in order to launch individually `lit` tests,  `pytest` tests or type checks.
-
-## Exploration
-
-Use exploration script, for instance random 100 points for a simple matmul tiling strategy (3D tiling):
-
-    loop-explore --debug --search random --trials 100 --output results.random.csv
-
-Use exploration script, for instance on input data generated on some tvm search (3D tiling + permutations), 2054 points here:
-
-    time -p loop-explore --debug --dims 256 256 512 --strategy tile4d --search data --data data/tvm_results.mm06.csv --output data/results.mm06-tile4d.csv
-    ...
-    2054/2054 [55:54,  1.63s/it]
-    real 3356 secs
-
-Use exhaustive search on a tiling strategy limited to tile4d + only vectorized tilings (450 points):
-
-    # TVM backend
-    time -p loop-explore --debug --dims 256 256 512 --strategy tile4dv --search exhaustive --backends tvm --output results.mm06-tile4dv-tvm.csv
-    450/450 [24:04,  3.21s/it]
-    real 1444.50
-
-    # MLIR backend
-    time -p loop-explore --debug --dims 256 256 512 --strategy tile4dv --search exhaustive --backends mlir --output results.mm06-tile4dv-mlir.csv
-    450/450 [22:34<00:00,  3.01s/it]
-    real 1355.98
-
-    # JIR backend
-    time -p loop-explore --debug --dims 256 256 512 --strategy tile4dv --search exhaustive --backends jir --output results.mm06-tile4dv-jir.csv
-    450/450 [22:30<00:00,  3.00s/it]
-    real 1352.37
-
-Test a single tiling:
-
-    # Dumps and execute MLIR tiling
-    loop-explore --dump --debug --dims 256 256 512 --strategy tile4d --test 4 64 8 4
-    ...
-    INFO:__main__:Schedule: [4, 64, 8, 4]: time: 1.89 msecs, peak perf: 26.38%
-    # Execute on all backends
-    loop-explore --backends tvm mlir jir --debug --dims 256 256 512 --strategy tile4d --test 4 64 8 4
-    ...
-    INFO:__main__:Schedule: [4, 64, 8, 4]: time: 0.61 msecs, peak perf: 82.08%
-
-## Display
-
-Result of exploration and display in `data/results.mm06-tile7d-all.svg` were generated with:
-
-    loop-explore --debug --dims 256 256 512 --backends tvm mlir jir --validate --strategy tile7d  --search random --trials 1000 --output data/results.mm06-tile7d-all.csv
-    loop-display --title 'Tile7D tiling strategy on 1000 samples for 256x256x512 matmul' data/results.mm06-tile7d-all.csv:tvm:X:peak:tvm data/results.mm06-tile7d-all.csv:mlir:X:peak:mlir data/results.mm06-tile7d-all.csv:jir:X:peak:jir --output data/results.mm06-tile7d-all.svg
-
-Comparative performance distribution on tile4dv tilings in `data/mlir_results.mm06-tile4dv-all.svg` were generated with:
-
-    loop-explore --debug --dims 256 256 512 --backends tvm mlir jir --validate --strategy tile4dv  --search exhaustive --output data/results.mm06-tile4dv-all.csv
-    loop-display --title "Tile4DV tiling strategy exhaustive for 256x256x512 vectorized matmul" data/results.mm06-tile4dv-all.csv:tvm:X:peak:tvm data/results.mm06-tile4dv-all.csv:mlir:X:peak:mlir data/results.mm06-tile4dv-all.csv:jir:X:peak:jir --output data/results.mm06-tile4dv-all.svg
-
-
-# mlir-loop: high-level scheduling specifications in MLIR
-
-The ```mlir-loop``` tool provides a high-level syntax for
-controlling the scheduling of MLIR linear algebra (```linalg```)
-operators. For now, it only applies at ```memref``` level
-(not ```tensor```) and supports the following transformations:
-+ Tiling
-+ Loop interchange
-+ Vectorization
-+ Unrolling
-
-See the code below. For the simplicity of the example, it is a
-single operator function, but the tool accepts multiple operator
-functions.
-
-```
-func.func @myfun(
-  %A: memref<256x512xf32>,
-  %B: memref<512x256xf32>,
-  %C: memref<256x256xf32>
-) {
-  linalg.matmul
-    {
-      loop.dims = ["I","J","K"],
-      loop.schedule = {
-        "I" = {"parallelize"},
-          "J",
-            "K",
-              "I#1" = {"unroll"},
-                "K#8"= {"unroll"},
-                  "J#64" = {"vectorize"}
-      }
-    }
-    ins(%A, %B : memref<256x512xf32>, memref<512x256xf32>)
-    outs(%C : memref<256x256xf32>)
-  return
-}
-```
-
-Under the hood, this declarative "loop" attributes dialect is
-translated into the corresponding MLIR ```transform``` dialect
-command sequence. Thus, ```mlir-loop``` transformations fully reuse
-those implemented in ```mlir-opt```.
-
+To create the `CLAUDE.md` file required to use Claude Code: `make claude`
