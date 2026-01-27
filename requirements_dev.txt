@@ -9,4 +9,5 @@ mypy==1.15.0
 pytest
 pytest-xdist
 pyright==1.1.407
+types-PyYAML
 ruff==0.14.10

@@ -7,3 +7,4 @@ tqdm
 typing_extensions
 xdsl~=0.50.0
 pyyaml
+scikit-learn

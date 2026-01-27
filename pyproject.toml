@@ -4,7 +4,7 @@ version = "0.2.dev1"
 license = { text = "BSD 3 Clause" }
 authors = [{ name = "Hugo Pompougnac", email = "hugo.pompougnac@inria.fr" }]
 classifiers = ["Programming Language :: Python :: 3"]
-dependencies = ['jinja2', 'matplotlib', 'numpy', 'ordered-set', 'py-cpuinfo', 'tqdm', 'typing_extensions', 'pyyaml','lit','filecheck','xdsl~=0.54.0']
+dependencies = ['jinja2', 'matplotlib', 'numpy', 'ordered-set', 'py-cpuinfo', 'tqdm', 'typing_extensions', 'pyyaml','scikit-learn','lit','filecheck','xdsl~=0.54.0']
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
@@ -19,6 +19,7 @@ dev = [
     "pytest",
     "pytest-xdist",
     "pyright==1.1.407",
+    "types-PyYAML",
     "marimo==0.14.16",
     "ruff==0.14.10",
 ]
