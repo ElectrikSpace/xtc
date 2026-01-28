@@ -164,7 +164,7 @@ def normalize_schedule(
                 for instr, param in val.data.items():
                     assert isinstance(instr, str)
                     if isinstance(param, builtin.UnitAttr):
-                        annotations[instr] = None
+                        annotations[instr] = True
                     elif isinstance(param, builtin.IntegerAttr):
                         annotations[instr] = param.value.data
                     else:

@@ -123,7 +123,7 @@ def _get_spec_atom_ratio(
         str_comma = ""
 
     if b_paral:
-        str_paral = '"parallelize": None'
+        str_paral = '"parallelize": True'
     else:
         str_paral = ""
 
@@ -215,7 +215,7 @@ def get_descr_sched(
             # Vector size (in elements)
             size_vec = int(machine.vector_size / comp.elem_size)
             if b_is_graph_interface:
-                str_spec_atom = f'"{dim_atom}#{size_vec}": ' + '{"vectorize" : None}\n'
+                str_spec_atom = f'"{dim_atom}#{size_vec}": ' + '{"vectorize" : True}\n'
             else:
                 str_spec_atom = f'"{dim_atom}#{size_vec}"= ' + '{ "vectorize" }\n'
             # Note: no comma at the end since vect is suppose to be the first atom (last in the list)

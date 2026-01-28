@@ -57,7 +57,7 @@ def test_get_descr_sched_graph_1():
 "w#2": {"unroll" : 2},
 "h#2": {"unroll" : 2},
 "f#64": {"unroll" : 64},
-"f#16": {"vectorize" : None}
+"f#16": {"vectorize" : True}
 }"""
   assert(str_descriptor == expected_str)
   return
@@ -75,7 +75,7 @@ def test_get_descr_sched_graph_2():
   str_descriptor = get_descr_sched(scheme, comp, machine, True)
   d_desc = eval(str_descriptor)
   
-  str_expected = "{'n': {}, 'w[0:160]': {'w#160': {}, 'w#80': {}, 's': {}, 'w#20': {}, 'h': {}, 'r': {}, 'c': {}, 'w#10': {}, 'h#68': {}, 'h#34': {}, 'c#16': {}, 'c#2': {'unroll': 2}, 'w#5': {'unroll': 5}, 'f': {'unroll': 64}, 'f#16': {'vectorize': None}}, 'w[160:272]': {'w#112': {}, 's': {}, 'w#28': {}, 'h': {}, 'r': {}, 'c': {}, 'w#14': {}, 'h#68': {}, 'h#34': {}, 'c#16': {}, 'c#2': {'unroll': 2}, 'w#7': {'unroll': 7}, 'f': {'unroll': 64}, 'f#16': {'vectorize': None}}}"
+  str_expected = "{'n': {}, 'w[0:160]': {'w#160': {}, 'w#80': {}, 's': {}, 'w#20': {}, 'h': {}, 'r': {}, 'c': {}, 'w#10': {}, 'h#68': {}, 'h#34': {}, 'c#16': {}, 'c#2': {'unroll': 2}, 'w#5': {'unroll': 5}, 'f': {'unroll': 64}, 'f#16': {'vectorize': True}}, 'w[160:272]': {'w#112': {}, 's': {}, 'w#28': {}, 'h': {}, 'r': {}, 'c': {}, 'w#14': {}, 'h#68': {}, 'h#34': {}, 'c#16': {}, 'c#2': {'unroll': 2}, 'w#7': {'unroll': 7}, 'f': {'unroll': 64}, 'f#16': {'vectorize': True}}}"
   
   assert(str(d_desc) == str_expected)
   return

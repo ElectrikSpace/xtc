@@ -25,8 +25,8 @@ descript_scheduler(
         "K": {},
         "I": {},
         "J": {},
-        "I#2": {"unroll": None},
-        "J#16": {"vectorize": None},
+        "I#2": {"unroll": True},
+        "J#16": {"vectorize": True},
     }
 )
 

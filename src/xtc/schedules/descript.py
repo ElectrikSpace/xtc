@@ -168,20 +168,30 @@ class ScheduleParser:
 
         for key, param in value.items():
             if key == "unroll":
-                unroll_factor = param
-                unroll_specified = True
+                if param is True:
+                    unroll_factor = None
+                    unroll_specified = True
+                elif param is False:
+                    pass
+                elif isinstance(param, int):
+                    unroll_factor = param
+                    unroll_specified = True
+                else:
+                    raise ScheduleParseError(
+                        f'`{{"unroll" = {param}}}`: unroll parameter should be True, False, or an integer.'
+                    )
             elif key == "vectorize":
-                if param is not None:
+                if not isinstance(param, bool):
                     raise ScheduleParseError(
                         f'`{{"vectorize" = {param}}}`: parameterized vectorization not implemented.'
                     )
-                vectorize = True
+                vectorize = param
             elif key == "parallelize":
-                if param is not None:
+                if not isinstance(param, bool):
                     raise ScheduleParseError(
                         f'`{{"parallelize" = {param}}}`: parameterized parallelization not implemented.'
                     )
-                parallelize = True
+                parallelize = param
             else:
                 raise ScheduleParseError(f"Unknown annotation on {context}: {key}")
 
