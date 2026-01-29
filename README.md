@@ -51,19 +51,25 @@ export DYLD_LIBRARY_PATH="/opt/homebrew/opt/libomp/lib:$DYLD_LIBRARY_PATH"
 
 ### Installation
 
-**Python**: 3.10 to 3.14 inclusive
-
+Linux (Python: 3.10 to 3.14 inclusive):
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip3 install -e '.[dev]'
-# Linux
-pip3 install -r mlir_requirements.txt        # Optional: MLIR backend
-pip3 install -r tvm_requirements.txt         # Optional: TVM backend
-# MacOS 
-pip3 install -r macos_mlir_requirements.txt  # Optional: MLIR backend
-pip3 install -r macos_tvm_requirements.txt   # Optional: TVM backend
-make test                                    # Run minimal unit tests
+pip install -e '.[dev]'
+pip install -r mlir_requirements.txt        # Optional: MLIR backend
+pip install -r tvm_requirements.txt         # Optional: TVM backend
+make test                                   # Run minimal unit tests
 ```
+
+MacOs M1+ (Python: 3.10 to 3.13 inclusive):
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e '.[dev]'
+pip install -r macos_mlir_requirements.txt  # Optional: MLIR backend
+pip install -r macos_tvm_requirements.txt   # Optional: TVM backend
+make test                                   # Run minimal unit tests
+```
+
+**Note:** The macOS distribution is experimental and not fully integrated or tested. We expose it for development purposes (feel free to contribute!).
 
 ### Code quality
 
