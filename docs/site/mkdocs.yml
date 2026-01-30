@@ -1,5 +1,5 @@
 site_name: XTC
-site_url: https://corse.gitlabpages.inria.fr/XTC/
+site_url: https://xtc-tools.github.io/xtc/
 
 nav:
 - "Home": index.md

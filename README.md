@@ -4,9 +4,7 @@
 
 ## Links
 
-Refer to documentation at https://corse.gitlabpages.inria.fr/XTC
-
-Refer to installable python packages at: https://gitlab.inria.fr/corse/xtc/-/packages
+Refer to documentation at https://xtc-tools.github.io/xtc
 
 Refer to tutorials [here](docs/tutorials) and to additionnal developers documentation [here](docs/develop).
 

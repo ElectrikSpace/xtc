@@ -1,5 +1,12 @@
-name: XTC Tests
-on: [push, pull_request]
+name: XTC Build and Tests
+
+# Runs on pushes targeting the main branch, pull request and manual Actions tab
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
