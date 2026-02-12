@@ -328,6 +328,9 @@ class MlirProgramInsertTransformPass:
         if schedule.unrolling:
             self._unroll(permutation, schedule, sched_state)
 
+        # Distribute loops
+        self._distribute_loops(permutation, schedule, sched_state)
+
         return sched_state
 
     def _generate_tiling_insns(
@@ -475,14 +478,29 @@ class MlirProgramInsertTransformPass:
                 loop_unroll(
                     sched_state.all_loops[dim_name], schedule.unrolling[dim_name]
                 )
-            if dim_name in schedule.distribution.keys():
-                assert self._named_sequence is not None
-                assert sdist_transform is not None
-                sdist_transform.SDistDistributeLoopOp(
-                    target=sched_state.all_loops[dim_name],
+
+    def _distribute_loops(
+        self,
+        permutation: list[str],
+        schedule: MlirNodeSchedule,
+        sched_state: SchedulingState,
+    ):
+        if len(schedule.distribution) == 0:
+            return
+        assert self._named_sequence is not None
+        assert sdist_transform is not None
+        for loop_name in permutation:
+            if loop_name in schedule.distribution:
+                distribute_command = sdist_transform.SDistDistributeLoopOp(
+                    target=sched_state.all_loops[loop_name],
                     mesh="processor_mesh",
-                    axis=schedule.distribution[dim_name],
+                    axis=schedule.distribution[loop_name],
                 )
+                assert len(distribute_command.results) == 1
+                new_loop = distribute_command.results[0]
+                sched_state.all_loops[loop_name] = new_loop
+                # Annotate the resulting loop if successfully generated
+                transform.AnnotateOp(new_loop, loop_name)
 
     def _distribute_buffer(
         self,
