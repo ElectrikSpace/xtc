@@ -80,6 +80,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:      transform.annotate %loops_9 "./j1" : !transform.any_op
 # CHECK-NEXT:      transform.loop.unroll %loops_7 {factor = 2 : i64} : !transform.any_op
 # CHECK-NEXT:      %6 = transform.sdist.distribute_loop %forall_op {axis = "px", mesh = "processor_mesh"} : (!transform.any_op) -> !transform.any_op
+# CHECK-NEXT:      transform.annotate %6 "./i" : !transform.any_op
 # CHECK-NEXT:      transform.yield 
 # CHECK-NEXT:    }
 # CHECK-NEXT:  }
@@ -163,7 +164,7 @@ print(f"CODE: {res}")
 # CHECK-NEXT:            } {"./j1"}
 # CHECK-NEXT:          } {"./j"}
 # CHECK-NEXT:          sdist.terminator
-# CHECK-NEXT:        }
+# CHECK-NEXT:        } {"./i"}
 # CHECK-NEXT:      } {"./k"}
 # CHECK-NEXT:      return
 # CHECK-NEXT:    }
