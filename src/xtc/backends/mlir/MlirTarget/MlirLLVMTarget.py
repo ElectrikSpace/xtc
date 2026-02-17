@@ -24,6 +24,9 @@ from xtc.utils.ext_tools import (
     system_libs,
     cc_bin,
 )
+from xtc.utils.host_tools import (
+    target_triple,
+)
 
 from xtc.targets.host import HostModule
 import xtc.itf as itf
@@ -205,6 +208,9 @@ class MlirLLVMTarget(MlirTarget):
             llc_arch = [f"--mcpu={self._config.cpu}"]
         else:
             llc_arch = [f"-march={self._config.arch}", f"--mcpu={self._config.cpu}"]
+            triple = target_triple(self._config.arch)
+            if triple:
+                llc_arch += [f"--mtriple={triple}"]
         return llc + llc_opts + llc_arch
 
     @property

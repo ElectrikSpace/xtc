@@ -35,7 +35,7 @@ jobs:
       - name: Install macOS Packages
         if: runner.os == 'macOs'
         run: |
-          brew install libomp
+          brew install libomp x86_64-linux-gnu-binutils aarch64-elf-binutils
           export DYLD_LIBRARY_PATH="/opt/homebrew/opt/libomp/lib:$DYLD_LIBRARY_PATH"
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5

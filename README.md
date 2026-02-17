@@ -22,7 +22,7 @@ XTC is a domain-specific dataflow graph compiler for linear algebra operations. 
 
 If needed, install uv following the instructions [here](https://docs.astral.sh/uv/).
 
-Debian-like Linux distributions (Python: 3.10 to 3.14 inclusive):
+Debian-like x86_64 Linux distributions (Python: 3.10 to 3.14 inclusive):
 ```bash
 sudo apt install python3 python3-dev build-essential libomp5 binutils binutils-aarch64-linux-gnu binutils-x86-64-linux-gnu
 sudo apt install libpfm4-dev # Optional: interface to Linux perf counters
@@ -34,9 +34,9 @@ uv pip install -r tvm_requirements.txt
 make test
 ```
 
-MacOs M1+ (Python: 3.10 to 3.12 inclusive, wheels only available for macOS Sequoia):
+MacOs M1+ macos-14/macos-15 (Python: 3.10 to 3.14 inclusive):
 ```bash
-brew install libomp
+brew install libomp x86_64-linux-gnu-binutils aarch64-elf-binutils
 export DYLD_LIBRARY_PATH="/opt/homebrew/opt/libomp/lib:$DYLD_LIBRARY_PATH"
 uv venv -p 3.12 && source .venv/bin/activate
 uv pip install -e '.[dev]'
