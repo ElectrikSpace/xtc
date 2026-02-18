@@ -53,6 +53,7 @@ extern uint64_t read_perf_event(int perf_fd);
 extern void close_perf_event(int perf_fd);
 extern void open_raw_perf_events(int n_events, const int *events_pairs, int *fds);
 extern void open_perf_events(int n_events, const perf_event_args_t *events, int *fds);
+extern void enable_perf_events(int n_events, const int *fds);
 extern void close_perf_events(int n_events, const int *fds);
 extern void reset_perf_events(int n_events, const int *fds, uint64_t *results);
 extern void start_perf_events(int n_events, const int *fds, uint64_t *results);
