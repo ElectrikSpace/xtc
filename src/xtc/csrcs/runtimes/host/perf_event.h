@@ -7,6 +7,13 @@
 
 #include <stdint.h>
 
+#define CONCAT2_IMPL(A,B) A ## B
+#define CONCAT2(A,B) CONCAT2_IMPL(A,B)
+#define CONCAT3_IMPL(A,B,C) A ## B ## C
+#define CONCAT3(A,B,C) CONCAT3_IMPL(A,B,C)
+#define STR_IMPL(A) #A
+#define STR(A) STR_IMPL(A)
+
 #define PERF_EVENT_MAX_EVENTS 256
 
 #define PERF_EVENT_CYCLES 0
