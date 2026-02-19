@@ -28,6 +28,8 @@ from ..MlirConfig import MlirConfig
 from ..MlirProgram import RawMlirProgram
 
 from mlir.passmanager import PassManager
+from mlir.ir import OpResult
+from mlir.dialects import transform
 
 __all__ = ["MlirMppaTarget"]
 
@@ -158,6 +160,14 @@ class MlirMppaTarget(MlirTarget):
         return MppaModule(
             name, payload_name, file_name, file_type, mppa_config, graph, **kwargs
         )
+
+    @override
+    def has_custom_vectorize(self) -> bool:
+        return True
+
+    @override
+    def apply_custom_vectorize(self, handle: OpResult) -> None:
+        transform.AnnotateOp(handle, "xtc.request_vectorization")
 
     def dump_ir(self, mlir_program: RawMlirProgram, title: str):
         print(f"// -----// {title} //----- //", file=sys.stderr)
@@ -304,7 +314,9 @@ class MlirMppaBackend:
         passes.append("canonicalize")
         passes.append("func.func(kvxpe-scf-forall-distribute{num-pes=1})")
         passes.append("func.func(kvxpe-launch)")
-        passes.append("func.func(kvxuks-catch)")
+        passes.append(
+            "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization})"
+        )
         passes.append("canonicalize")
         passes.append("convert-linalg-to-loops")
         passes.append("func.func(lower-affine)")
