@@ -140,6 +140,7 @@ class MlirProgramCompiler:
             concluding_passes=self._config.concluding_passes,
             always_vectorize=self._config.always_vectorize,
             vectors_size=self._config.vectors_size,
+            target=self._target,
         )
         insert_transform_pass.run()
         if self._config.print_source_ir:
