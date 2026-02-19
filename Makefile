@@ -58,6 +58,7 @@ check-lit-nvgpu:
 
 check-lit-mppa:
 	env XTC_MLIR_TARGET=mppa lit -v -j 1 tests/filecheck/backends/target_mppa
+	env XTC_MLIR_TARGET=mppa lit -v -j 1 tests/filecheck/evaluation/test_matmul_pmu_counters_mppa.py
 
 check-pytest:
 	scripts/pytest/run_pytest.sh -v
