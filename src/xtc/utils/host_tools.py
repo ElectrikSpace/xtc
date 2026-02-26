@@ -78,7 +78,7 @@ def disassemble(
         "--no-show-raw-insn",
     ]
     target = target_arch(arch)
-    if target in ["x86_64", "aarch64"]:
+    if target in ["x86_64", "aarch64"] or platform.system() == "Linux":
         jumps_opts = []
         disass_symbol_opt = [f"--disassemble={function}"]
     elif platform.system() == "Darwin":
