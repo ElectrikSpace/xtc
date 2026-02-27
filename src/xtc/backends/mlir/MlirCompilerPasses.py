@@ -311,7 +311,6 @@ class MlirProgramInsertTransformPass:
             # Manage the strip-mining
             if loop_name in schedule.vectorization:
                 self._vectorize(sched_state)
-                break
             elif loop_name in tiles_sizes_by_loops:
                 self._strip_mine(
                     loop_name=loop_name,
