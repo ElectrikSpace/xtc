@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+from typing import cast
 from dataclasses import dataclass
 from mlir.dialects import transform
 from mlir.dialects.transform import (
@@ -39,6 +40,7 @@ from xtc.utils.ext_tools import transform_opts
 from .MlirProgram import RawMlirProgram
 from .MlirScheduler import MlirSchedule, MlirNodeSchedule
 from .MlirTarget import MlirTarget
+
 
 _VECTO_SEQ_NAME = "_vecto"
 _SUPER_VECTORIZE_SEQ_NAME = "_super_vectorize"
@@ -307,6 +309,12 @@ class MlirProgramInsertTransformPass:
                     schedule=schedule,
                     sched_state=sched_state,
                 )
+            if loop_name in schedule.write_buffers:
+                self._write_buffer(
+                    loop_name=loop_name,
+                    schedule=schedule,
+                    sched_state=sched_state,
+                )
 
             # Manage the strip-mining
             if loop_name in schedule.vectorization:
@@ -319,6 +327,8 @@ class MlirProgramInsertTransformPass:
                     schedule=schedule,
                     sched_state=sched_state,
                 )
+                if loop_name in schedule.distribution:
+                    self._distribute_loop(loop_name, schedule, sched_state)
 
         # For now on, the focus is on the outermost loop
         if sched_state.all_loops:
@@ -327,9 +337,6 @@ class MlirProgramInsertTransformPass:
         # Unrolling
         if schedule.unrolling:
             self._unroll(permutation, schedule, sched_state)
-
-        # Distribute loops
-        self._distribute_loops(permutation, schedule, sched_state)
 
         return sched_state
 
@@ -479,28 +486,24 @@ class MlirProgramInsertTransformPass:
                     sched_state.all_loops[dim_name], schedule.unrolling[dim_name]
                 )
 
-    def _distribute_loops(
+    def _distribute_loop(
         self,
-        permutation: list[str],
+        loop_name: str,
         schedule: MlirNodeSchedule,
         sched_state: SchedulingState,
     ):
-        if len(schedule.distribution) == 0:
-            return
-        assert self._named_sequence is not None
         assert sdist_transform is not None
-        for loop_name in permutation:
-            if loop_name in schedule.distribution:
-                distribute_command = sdist_transform.SDistDistributeLoopOp(
-                    target=sched_state.all_loops[loop_name],
-                    mesh="processor_mesh",
-                    axis=schedule.distribution[loop_name],
-                )
-                assert len(distribute_command.results) == 1
-                new_loop = distribute_command.results[0]
-                sched_state.all_loops[loop_name] = new_loop
-                # Annotate the resulting loop if successfully generated
-                transform.AnnotateOp(new_loop, loop_name)
+        distribute_command = sdist_transform.SDistDistributeLoopOp(
+            target=sched_state.all_loops[loop_name],
+            mesh="processor_mesh",
+            axis=schedule.distribution[loop_name],
+        )
+        assert len(distribute_command.results) == 2
+        new_loop = distribute_command.results[0]
+        sched_state.all_loops[loop_name] = new_loop
+        sched_state.handle = distribute_command.results[1]
+        # Annotate the resulting loop if successfully generated
+        transform.AnnotateOp(new_loop, loop_name)
 
     def _distribute_buffer(
         self,
@@ -532,6 +535,28 @@ class MlirProgramInsertTransformPass:
                     target=sched_state.handle,
                     input_idx=input_idx,
                 )
+
+    def _write_buffer(
+        self,
+        loop_name: str,
+        schedule: MlirNodeSchedule,
+        sched_state: SchedulingState,
+    ):
+        from .MlirGraphBackend import MlirGraphBackend
+        from .MlirNodeBackend import MlirNodeBackend
+
+        assert self._mlir_schedule is not None
+        graph_backend = cast(MlirGraphBackend, self._mlir_schedule.scheduler.backend)
+        node_backend = cast(MlirNodeBackend, graph_backend.nodes[schedule.node_name])
+        output_idx = len(node_backend.np_inputs_spec())
+        with InsertionPoint(transform.ApplyPatternsOp(sched_state.handle).patterns):
+            memref.ApplyFoldMemrefAliasOpsPatternsOp()
+        if "sdist" in self._mlir_program.mlir_extensions:
+            assert sdist_transform is not None
+            sdist_transform.SDistLocalBufferAtOp(
+                target=sched_state.handle,
+                input_idx=output_idx,
+            )
 
 
 class MlirProgramApplyTransformPass:
