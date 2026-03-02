@@ -5,6 +5,8 @@
 import os
 import shutil
 from pathlib import Path
+import subprocess
+import tempfile
 
 
 def get_mlir_prefix(prefix: Path | str | None = None):
@@ -102,3 +104,28 @@ def get_cuda_prefix(prefix: Path | str | None = None):
     if not prefix.exists():
         raise RuntimeError(f"could not find CUDA installation dir at: {prefix}")
     return prefix
+
+
+def check_compile(code: str, libs: str | list[str] | None = None):
+    """
+    Attempt to compile (and link) a small C program.
+    """
+    compiler = shutil.which("cc") or shutil.which("gcc")
+    if compiler is None:
+        return False
+
+    if isinstance(libs, str):
+        libs = [libs]
+    libs = libs or []
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src_path = os.path.join(tmpdir, "test.c")
+        exe_path = os.path.join(tmpdir, "test")
+
+        with open(src_path, "w") as f:
+            f.write(code)
+
+        cmd = [compiler, src_path, "-o", exe_path] + [f"-l{lib}" for lib in libs]
+
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return result.returncode == 0

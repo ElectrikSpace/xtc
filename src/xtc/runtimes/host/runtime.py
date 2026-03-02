@@ -3,7 +3,6 @@
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
 import ctypes
-import ctypes.util
 import tempfile
 import subprocess
 import threading
@@ -14,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from enum import Enum
 
-from xtc.utils.tools import get_mlir_prefix, get_cuda_prefix
+from xtc.utils.tools import get_mlir_prefix, get_cuda_prefix, check_compile
 
 __all__ = ["runtime_funcs", "resolve_runtime", "RuntimeType"]
 
@@ -147,7 +146,9 @@ runtime_funcs: dict[str, dict[str, Any]] = {
 
 
 def _compile_runtime(out_dll: str, tdir: str, runtime_type: RuntimeType):
-    has_pfm = ctypes.util.find_library("pfm") is not None
+    has_pfm = check_compile(
+        "#include <perfmon/pfmlib.h>\nint main() { return 0; }\n", libs="pfm"
+    )
     pfm_opts = "-DHAS_PFM=1" if has_pfm else ""
     pfm_libs = "-lpfm" if has_pfm else ""
     has_gpu = runtime_type == RuntimeType.GPU
