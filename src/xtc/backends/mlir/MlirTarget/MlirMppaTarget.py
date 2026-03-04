@@ -213,6 +213,8 @@ class MlirProgramToMlirMppaPass:
         ]
         if "sdist" in self._mlir_program.mlir_extensions:
             pipeline += [
+                "func.func(sdist-fuse-linalg-fill-ops)",
+                "cse",
                 "sdist-lower-distribution",
                 "cse",
                 "convert-sdist-to-mppa",
