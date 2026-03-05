@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+from typing import cast
 from dataclasses import dataclass
 from mlir.dialects import transform
 from mlir.dialects.transform import (
@@ -312,6 +313,12 @@ class MlirProgramInsertTransformPass:
                     schedule=schedule,
                     sched_state=sched_state,
                 )
+            if loop_name in schedule.write_buffers:
+                self._write_buffer(
+                    loop_name=loop_name,
+                    schedule=schedule,
+                    sched_state=sched_state,
+                )
 
             # Manage the strip-mining
             if loop_name in schedule.vectorization:
@@ -505,7 +512,6 @@ class MlirProgramInsertTransformPass:
                     mesh="processor_mesh",
                     axis=schedule.distribution[loop_name],
                 )
-                assert len(distribute_command.results) == 1
                 new_loop = distribute_command.results[0]
                 sched_state.all_loops[loop_name] = new_loop
                 # Annotate the resulting loop if successfully generated
@@ -541,6 +547,28 @@ class MlirProgramInsertTransformPass:
                     target=sched_state.handle,
                     input_idx=input_idx,
                 )
+
+    def _write_buffer(
+        self,
+        loop_name: str,
+        schedule: MlirNodeSchedule,
+        sched_state: SchedulingState,
+    ):
+        from .MlirGraphBackend import MlirGraphBackend
+        from .MlirNodeBackend import MlirNodeBackend
+
+        assert self._mlir_schedule is not None
+        graph_backend = cast(MlirGraphBackend, self._mlir_schedule.scheduler.backend)
+        node_backend = cast(MlirNodeBackend, graph_backend.nodes[schedule.node_name])
+        output_idx = len(node_backend.np_inputs_spec())
+        with InsertionPoint(transform.ApplyPatternsOp(sched_state.handle).patterns):
+            memref.ApplyFoldMemrefAliasOpsPatternsOp()
+        if "sdist" in self._mlir_program.mlir_extensions:
+            assert sdist_transform is not None
+            sdist_transform.SDistLocalBufferAtOp(
+                target=sched_state.handle,
+                input_idx=output_idx,
+            )
 
 
 class MlirProgramApplyTransformPass:
