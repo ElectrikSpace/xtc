@@ -27,11 +27,12 @@ class MlirNodeSchedule:
     parallelization: list[str]
     unrolling: dict[str, int]
     packed_buffers: dict[str, list[int]]
+    write_buffers: list[str]
     memory_mesh: dict[str, int]
     processor_mesh: dict[str, int]
     distribution: dict[str, str]
-    distributed_buffers: dict[str, dict]
     fused: list[tuple[str, int]]
+    distributed_buffers: dict[str, list[dict]]
 
     def index_of_dim(self, dim: str) -> int:
         return list(self.dims).index(dim)
@@ -88,11 +89,12 @@ class MlirNodeScheduler:
         self.parallelization: list[str] = []
         self.unrolling: dict[str, int] = {}
         self.packed_buffers: dict[str, list[int]] = {}
+        self.write_buffers: list[str] = []
         self.memory_mesh: dict[str, int] = {}
         self.processor_mesh: dict[str, int] = {}
         self.distribution: dict[str, str] = {}
-        self.distributed_buffers: dict[str, dict] = {}
         self.fused: list[tuple[str, int]] = []
+        self.distributed_buffers: dict[str, list[dict]] = {}
 
     def mlir_node_schedule(self) -> MlirNodeSchedule:
         if not self.permutation:
@@ -116,6 +118,7 @@ class MlirNodeScheduler:
             unrolling=self.unrolling,
             memory_mesh=self.memory_mesh,
             packed_buffers=self.packed_buffers,
+            write_buffers=self.write_buffers,
             processor_mesh=self.processor_mesh,
             distribution=self.distribution,
             distributed_buffers=self.distributed_buffers,
@@ -183,6 +186,10 @@ class MlirNodeScheduler:
         else:
             self.packed_buffers[axis_key].append(input_idx)
 
+    def buffer_at(self, axis: str, mtype: str | None = None, root: str = DEFAULT_ROOT):
+        axis_key = make_loop_name(root, axis)
+        self.write_buffers.append(axis_key)
+
     def define_memory_mesh(self, axes: dict[str, int]):
         assert len(self.memory_mesh) == 0, "Memory mesh has already been defined"
         self.memory_mesh = axes
@@ -221,10 +228,14 @@ class MlirNodeScheduler:
                 "Memory axis not found in memory mesh"
             )
         axis_key = make_loop_name(root, axis)
-        self.distributed_buffers[axis_key] = {
-            "input_idx": input_idx,
-            "memory_axes": memory_axes,
-        }
+        if axis_key not in self.distributed_buffers.keys():
+            self.distributed_buffers[axis_key] = []
+        self.distributed_buffers[axis_key].append(
+            {
+                "input_idx": input_idx,
+                "memory_axes": memory_axes,
+            }
+        )
 
     def fuse_producer_at(
         self, axis: str, input_idx: int, root: str = DEFAULT_ROOT

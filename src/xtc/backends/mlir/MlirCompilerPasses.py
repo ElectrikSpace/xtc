@@ -3,6 +3,7 @@
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
 from .MlirLoopNames import parent_name
+from typing import cast
 from dataclasses import dataclass
 from mlir.dialects import transform
 from mlir.dialects.transform import (
@@ -338,13 +339,19 @@ class MlirProgramInsertTransformPass:
                 loop_name = make_loop_name(root, axis_split)
             # Bufferization
             if loop_name in schedule.distributed_buffers.keys():
-                self._distribute_buffer(
+                self._distribute_buffers(
                     loop_name=loop_name,
                     schedule=schedule,
                     sched_state=sched_state,
                 )
             if loop_name in schedule.packed_buffers.keys():
                 self._pack_buffer(
+                    loop_name=loop_name,
+                    schedule=schedule,
+                    sched_state=sched_state,
+                )
+            if loop_name in schedule.write_buffers:
+                self._write_buffer(
                     loop_name=loop_name,
                     schedule=schedule,
                     sched_state=sched_state,
@@ -616,7 +623,7 @@ class MlirProgramInsertTransformPass:
         # Annotate the resulting loop if successfully generated
         transform.AnnotateOp(new_loop, loop_name)
 
-    def _distribute_buffer(
+    def _distribute_buffers(
         self,
         loop_name: str,
         schedule: MlirNodeSchedule,
@@ -624,12 +631,13 @@ class MlirProgramInsertTransformPass:
     ):
         # TODO multiple buffers
         assert sdist_transform is not None
-        sdist_transform.SDistDistributeBufferAtOp(
-            target=sched_state.handle,
-            mesh="memory_mesh",
-            input_idx=schedule.distributed_buffers[loop_name]["input_idx"],
-            axes=schedule.distributed_buffers[loop_name]["memory_axes"],
-        )
+        for dist_buffer in schedule.distributed_buffers[loop_name]:
+            sdist_transform.SDistDistributeBufferAtOp(
+                target=sched_state.handle,
+                mesh="memory_mesh",
+                input_idx=dist_buffer["input_idx"],
+                axes=dist_buffer["memory_axes"],
+            )
 
     def _pack_buffer(
         self,
@@ -646,6 +654,28 @@ class MlirProgramInsertTransformPass:
                     target=sched_state.handle,
                     input_idx=input_idx,
                 )
+
+    def _write_buffer(
+        self,
+        loop_name: str,
+        schedule: MlirNodeSchedule,
+        sched_state: SchedulingState,
+    ):
+        from .MlirGraphBackend import MlirGraphBackend
+        from .MlirNodeBackend import MlirNodeBackend
+
+        assert self._mlir_schedule is not None
+        graph_backend = cast(MlirGraphBackend, self._mlir_schedule.scheduler.backend)
+        node_backend = cast(MlirNodeBackend, graph_backend.nodes[schedule.node_name])
+        output_idx = len(node_backend.np_inputs_spec())
+        with InsertionPoint(transform.ApplyPatternsOp(sched_state.handle).patterns):
+            memref.ApplyFoldMemrefAliasOpsPatternsOp()
+        if "sdist" in self._mlir_program.mlir_extensions:
+            assert sdist_transform is not None
+            sdist_transform.SDistLocalBufferAtOp(
+                target=sched_state.handle,
+                input_idx=output_idx,
+            )
 
     def _collect_fused_producers(self, unscheduled_handles: set[str | None]):
         # maps each fused consumer op to the producer handles that must be
