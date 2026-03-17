@@ -207,24 +207,27 @@ class MlirProgramToMlirMppaPass:
         self._mlir_program = mlir_program
 
     def _lowering_pipeline(self) -> list[str]:
-        pipeline = [
+        assert "sdist" in self._mlir_program.mlir_extensions
+        return [
+            "cse",
+            "sdist-insert-kernel-ops",
             "cse",
             "sccp",
+            "canonicalize",
+            "cse",
+            "func.func(sdist-fuse-linalg-fill-ops)",
+            "cse",
+            "sdist-lower-distribution",
+            "cse",
+            "convert-sdist-to-mppa",
+            "cse",
+            "convert-sdist-utils-to-mppa",
+            "cse",
+            "sdist-erase-kernel-ops",
+            "cse",
+            "canonicalize",
+            "cse",
         ]
-        if "sdist" in self._mlir_program.mlir_extensions:
-            pipeline += [
-                "func.func(sdist-fuse-linalg-fill-ops)",
-                "cse",
-                "sdist-lower-distribution",
-                "cse",
-                "convert-sdist-to-mppa",
-                "cse",
-                "convert-sdist-utils-to-mppa",
-                "cse",
-                "canonicalize",
-                "cse",
-            ]
-        return pipeline
 
     def run(self) -> None:
         self._mlir_program.mlir_context.allow_unregistered_dialects = True
@@ -306,8 +309,9 @@ class MlirMppaBackend:
         passes.append("func.func(kalray-lift-strided-memref-copy-to-linalg)")
         passes.append("canonicalize")
         passes.append("func.func(kvxcluster-lower-promoted-memory)")
+        passes.append("func.func(lower-affine)")
         passes.append(
-            "func.func(kvxcluster-optimize-dma-transfers{bundle=true pipeline=false})"
+            "func.func(kvxcluster-optimize-dma-transfers{bundle=true pipeline=true})"
         )
         passes.append("canonicalize")
         passes.append("func.func(kvxcluster-basic-static-allocation)")
@@ -321,7 +325,6 @@ class MlirMppaBackend:
         )
         passes.append("canonicalize")
         passes.append("convert-linalg-to-loops")
-        passes.append("func.func(lower-affine)")
         passes.append("func.func(expand-strided-metadata)")
         passes.append("func.func(kvx-non-canonical-vectorize)")
         passes.append("func.func(kvx-vectorize)")
