@@ -52,7 +52,7 @@ class MlirNodeBackend(MlirBackend):
     def _np_types_spec(
         self, types: list[MemRefType | TensorType]
     ) -> list[dict[str, tuple[int, ...] | str]]:
-        types_map = {"f32": "float32", "f64": "float64"}
+        types_map = {"f16": "float16", "f32": "float32", "f64": "float64"}
         types_spec: list[dict[str, tuple[int, ...] | str]] = [
             {
                 "shape": t.get_shape(),

@@ -10,6 +10,7 @@ from xdsl.dialects import func, memref, tensor, bufferization
 from xdsl.dialects.builtin import (
     MemRefType,
     TensorType,
+    f16,
     f32,
     f64,
     ArrayAttr,
@@ -188,7 +189,7 @@ class MlirGraphBackend(MlirBackend):
         return payload, nodes_dict
 
     def _xdsl_elt_shape_from_tensortype(self, type: XTCTensorType) -> tuple[Any, Any]:
-        elt_type = {"float32": f32, "float64": f64}[type.constant_dtype]
+        elt_type = {"float16": f16, "float32": f32, "float64": f64}[type.constant_dtype]
         return (elt_type, type.constant_shape)
 
     def _xdsl_type_from_tensortype(
@@ -218,7 +219,7 @@ class MlirGraphBackend(MlirBackend):
     def _np_types_spec(
         self, types: list[MemRefType] | list[TensorType]
     ) -> list[dict[str, tuple[int, ...] | str]]:
-        types_map = {"f32": "float32", "f64": "float64"}
+        types_map = {"f16": "float16", "f32": "float32", "f64": "float64"}
         types_spec: list[dict[str, tuple[int, ...] | str]] = [
             {
                 "shape": t.get_shape(),
