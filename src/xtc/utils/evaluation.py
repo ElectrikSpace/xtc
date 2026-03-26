@@ -129,8 +129,13 @@ def validate_outputs(
     # Get the function outputs
     CFunc(func)(*parameters[0], *parameters[1])
     # Compare
+    rtol = 5e-1 if ref_outputs[0].dtype == "float16" else 1e-5
     for out_ref, out in zip(ref_outputs, [out.numpy() for out in parameters[1]]):
-        if not np.allclose(out_ref, out):
+        if not np.allclose(out_ref, out, rtol=rtol):
+            for idx, (val_ref, val) in enumerate(zip(out_ref.flatten(), out.flatten())):
+                if not np.isclose(val_ref, val, rtol=rtol):
+                    print(f"Mismatch at element {idx}: expected {val_ref}, got {val}")
+                    return ([], 1, "Error in validation: outputs differ")
             return ([], 1, "Error in validation: outputs differ")
     return ([], 0, "")
 

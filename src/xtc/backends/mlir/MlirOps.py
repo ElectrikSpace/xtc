@@ -10,6 +10,7 @@ from typing import Any, Type, TypeAlias, cast
 from xdsl.dialects import linalg, arith, builtin, memref
 from xdsl.dialects.builtin import (
     MemRefType,
+    f16,
     f32,
     f64,
     i64,
@@ -145,8 +146,8 @@ class MlirOperatorMatmul(MlirOperator):
         self, block: Block | None = None, args: Sequence[BlockArgument] = []
     ) -> tuple[Block, OpAttrs]:
         Ki, Kj, Kk, dtype = self.args
-        elt_type = {"float32": f32, "float64": f64}[dtype]
-        elt_size = {"float32": 32, "float64": 64}[dtype]
+        elt_type = {"float16": f16, "float32": f32, "float64": f64}[dtype]
+        elt_size = {"float16": 16, "float32": 32, "float64": 64}[dtype]
         if block is None:
             ops_types = [
                 MemRefType(elt_type, shape) for shape in [[Ki, Kk], [Kk, Kj], [Ki, Kj]]
