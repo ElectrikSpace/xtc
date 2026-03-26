@@ -300,7 +300,7 @@ class MlirProgramInsertTransformPass:
 
             # Bufferization
             if loop_name in schedule.distributed_buffers.keys():
-                self._distribute_buffer(
+                self._distribute_buffers(
                     loop_name=loop_name,
                     schedule=schedule,
                     sched_state=sched_state,
@@ -507,7 +507,7 @@ class MlirProgramInsertTransformPass:
         # Annotate the resulting loop if successfully generated
         transform.AnnotateOp(new_loop, loop_name)
 
-    def _distribute_buffer(
+    def _distribute_buffers(
         self,
         loop_name: str,
         schedule: MlirNodeSchedule,
@@ -515,12 +515,13 @@ class MlirProgramInsertTransformPass:
     ):
         # TODO multiple buffers
         assert sdist_transform is not None
-        sdist_transform.SDistDistributeBufferAtOp(
-            target=sched_state.handle,
-            mesh="memory_mesh",
-            input_idx=schedule.distributed_buffers[loop_name]["input_idx"],
-            axes=schedule.distributed_buffers[loop_name]["memory_axes"],
-        )
+        for dist_buffer in schedule.distributed_buffers[loop_name]:
+            sdist_transform.SDistDistributeBufferAtOp(
+                target=sched_state.handle,
+                mesh="memory_mesh",
+                input_idx=dist_buffer["input_idx"],
+                axes=dist_buffer["memory_axes"],
+            )
 
     def _pack_buffer(
         self,

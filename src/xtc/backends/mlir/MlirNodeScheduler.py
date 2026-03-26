@@ -36,7 +36,7 @@ class MlirNodeSchedule:
     memory_mesh: dict[str, int]
     processor_mesh: dict[str, int]
     distribution: dict[str, str]
-    distributed_buffers: dict[str, dict]
+    distributed_buffers: dict[str, list[dict]]
 
     def index_of_dim(self, dim: str) -> int:
         return list(self.dims).index(dim)
@@ -97,7 +97,7 @@ class MlirNodeScheduler:
         self.memory_mesh: dict[str, int] = {}
         self.processor_mesh: dict[str, int] = {}
         self.distribution: dict[str, str] = {}
-        self.distributed_buffers: dict[str, dict] = {}
+        self.distributed_buffers: dict[str, list[dict]] = {}
 
     def mlir_node_schedule(self) -> MlirNodeSchedule:
         if not self.permutation:
@@ -225,7 +225,11 @@ class MlirNodeScheduler:
                 "Memory axis not found in memory mesh"
             )
         axis_key = f"{root}{ROOT_SEP}{axis}"
-        self.distributed_buffers[axis_key] = {
-            "input_idx": input_idx,
-            "memory_axes": memory_axes,
-        }
+        if axis_key not in self.distributed_buffers.keys():
+            self.distributed_buffers[axis_key] = []
+        self.distributed_buffers[axis_key].append(
+            {
+                "input_idx": input_idx,
+                "memory_axes": memory_axes,
+            }
+        )
