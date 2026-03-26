@@ -208,26 +208,22 @@ class MlirProgramToMlirMppaPass:
 
     def _lowering_pipeline(self) -> list[str]:
         assert "sdist" in self._mlir_program.mlir_extensions
-        return [
-            "cse",
-            "sdist-insert-kernel-ops",
-            "cse",
-            "sccp",
-            "canonicalize",
-            "cse",
-            "func.func(sdist-fuse-linalg-fill-ops)",
-            "cse",
-            "sdist-lower-distribution",
-            "cse",
-            "convert-sdist-to-mppa",
-            "cse",
-            "convert-sdist-utils-to-mppa",
-            "cse",
-            "sdist-erase-kernel-ops",
-            "cse",
-            "canonicalize",
-            "cse",
-        ]
+        passes = []
+        passes.append("sccp")
+        passes.append("sdist-lower-distribution")
+        passes.append("sdist-insert-kernel-ops")
+        passes.append("func.func(sdist-fuse-linalg-fill-ops)")
+        passes.append("sdist-group-transfers")
+        passes.append("sdist-remove-intermediate-subview-ops")
+        passes.append("convert-sdist-to-mppa{reverse-reads=false}")
+        passes.append("convert-sdist-utils-to-mppa")
+
+        new_passes = []
+        for p in passes:
+            new_passes.append(p)
+            new_passes.append("canonicalize")
+            new_passes.append("cse")
+        return new_passes
 
     def run(self) -> None:
         self._mlir_program.mlir_context.allow_unregistered_dialects = True
@@ -309,7 +305,8 @@ class MlirMppaBackend:
         passes.append("func.func(kalray-lift-strided-memref-copy-to-linalg)")
         passes.append("canonicalize")
         passes.append("func.func(kvxcluster-lower-promoted-memory)")
-        passes.append("func.func(lower-affine)")
+        passes.append("func.func(affine-expand-index-ops-as-affine)")
+        passes.append("canonicalize")
         passes.append(
             "func.func(kvxcluster-optimize-dma-transfers{bundle=true pipeline=true})"
         )
@@ -318,13 +315,20 @@ class MlirMppaBackend:
         passes.append("canonicalize")
         passes.append("func.func(kalray-remove-useless-initializations)")
         passes.append("canonicalize")
+        passes.append("func.func(libtensors-catch)")
+        passes.append("canonicalize")
         passes.append("func.func(kvxpe-scf-forall-distribute{num-pes=1})")
         passes.append("func.func(kvxpe-launch)")
+        passes.append("canonicalize")
         passes.append(
             "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization})"
         )
         passes.append("canonicalize")
         passes.append("convert-linalg-to-loops")
+        passes.append("canonicalize")
+        # passes.append("func.func(affine-super-vectorize)")
+        passes.append("func.func(lower-affine)")
+        passes.append("canonicalize")
         passes.append("func.func(expand-strided-metadata)")
         passes.append("func.func(kvx-non-canonical-vectorize)")
         passes.append("func.func(kvx-vectorize)")
@@ -334,9 +338,9 @@ class MlirMppaBackend:
         passes.append("func.func(lower-affine)")
         passes.append("cse")
         # TODO Enable Mppa traces
-        ##if config.mppa_trace_enable:
-        ##    passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.launch})")
-        ##    passes.append("kalray-apply-instrumentation{use-traces=" + str(config.mppa_trace_enable) + "}")
+        # if config.mppa_trace_enable:
+        #    passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.launch})")
+        #    passes.append("kalray-apply-instrumentation{use-traces=" + str(config.mppa_trace_enable) + "}")
         passes.append("func.func(kvxcluster-outline-kernels{specialize=true})")
         passes.append("func.func(canonicalize)")
 
@@ -412,12 +416,20 @@ class MlirMppaBackend:
     def link_kvx_library(
         self, obj_accelerator_dump_file: str, kvx_so_dump_file: str
     ) -> None:
+        libtensors_kernels = (
+            self._mlir_mppa_path + "/include/libtensors/libtensor_tests_kernel.o"
+        )
+        libtensors_kernels_2 = (
+            self._mlir_mppa_path + "/include/libtensors/libtensor_tests_kernel_2.o"
+        )  # FIXME test
         cmd = self.cmd_kvx_cc + [
             "-shared",
             "-fPIC",
             "-march=kv3-2",
             "-Wl,-soname=libkvx.so",
             obj_accelerator_dump_file,
+            libtensors_kernels,
+            libtensors_kernels_2,
             "-o",
             kvx_so_dump_file,
         ]
