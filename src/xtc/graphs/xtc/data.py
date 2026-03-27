@@ -35,11 +35,13 @@ class XTCTensorType(TensorType):
         dtype: DataType = None,
         device: AcceleratorDevice | None = None,
         const: bool = False,
+        layout: list[int] | None = None,
     ):
         self._shape = shape
         self._dtype = dtype
         self._device = device
         self._const = const
+        self._layout = layout
 
     @property
     @override
@@ -57,8 +59,14 @@ class XTCTensorType(TensorType):
         return self._device
 
     @property
+    @override
     def const(self) -> bool:
         return self._const
+
+    @property
+    @override
+    def layout(self) -> list[int] | None:
+        return self._layout
 
     @property
     @override
@@ -110,6 +118,9 @@ class XTCTensorType(TensorType):
         return XTCConstantTensorType(
             shape=self.constant_shape,
             dtype=self.constant_dtype,
+            device=self.device,
+            const=self.const,
+            layout=self.layout,
         )
 
     @override
@@ -120,7 +131,11 @@ class XTCTensorType(TensorType):
             dims = "x".join([str(d if d else "?") for d in self._shape])
         dtype = self._dtype if self._dtype else "?"
         const = ", const" if self.const else ""
-        return f"{dims}x{dtype}{const}"
+        layout = ""
+        if self.layout is not None:
+            layout += ", <(" + ",".join([str(i) for i in range(len(self._shape))]) + ")->("
+            layout += ",".join([str(i) for i in self.layout]) + ")>"
+        return f"{dims}x{dtype}{const}{layout}"
 
     @override
     def __eq__(self, other: object) -> bool:
@@ -130,13 +145,20 @@ class XTCTensorType(TensorType):
             self.dtype == other.dtype
             and self.shape == other.shape
             and self.const == other.const
+            and self.layout == other.layout
         )
 
 
 class XTCConstantTensorType(XTCTensorType, ConstantTensorType):
-    def __init__(self, shape: ConstantShapeType, dtype: ConstantDataType):
+    def __init__(self, shape: ConstantShapeType, dtype: ConstantDataType,
+                 device: AcceleratorDevice | None = None,
+                 const: bool = False,
+                 layout: list[int] | None = None):
         self._shape: ConstantShapeType = shape
         self._dtype: ConstantDataType = dtype
+        self._device = device
+        self._const = const
+        self._layout = layout
 
     @property
     @override

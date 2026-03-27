@@ -210,12 +210,13 @@ class MlirProgramToMlirMppaPass:
         assert "sdist" in self._mlir_program.mlir_extensions
         passes = []
         passes.append("sccp")
+        passes.append("linalg-specialize-generic-ops")
         passes.append("sdist-lower-distribution")
         passes.append("sdist-insert-kernel-ops")
         passes.append("func.func(sdist-fuse-linalg-fill-ops)")
         passes.append("sdist-group-transfers")
         passes.append("sdist-remove-intermediate-subview-ops")
-        passes.append("convert-sdist-to-mppa{reverse-reads=false}")
+        passes.append("convert-sdist-to-mppa{reverse-reads=true}")
         passes.append("convert-sdist-utils-to-mppa")
 
         new_passes = []
@@ -308,7 +309,7 @@ class MlirMppaBackend:
         passes.append("func.func(affine-expand-index-ops-as-affine)")
         passes.append("canonicalize")
         passes.append(
-            "func.func(kvxcluster-optimize-dma-transfers{bundle=true pipeline=true})"
+            "func.func(kvxcluster-optimize-dma-transfers{bundle=true pipeline=false})"
         )
         passes.append("canonicalize")
         passes.append("func.func(kvxcluster-basic-static-allocation)")
