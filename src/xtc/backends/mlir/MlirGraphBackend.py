@@ -156,9 +156,12 @@ class MlirGraphBackend(MlirBackend):
         return MemRefType(elt_type, shape)
 
     def _xdsl_attrs_from_tensortype(self, type: XTCTensorType):
+        attrs = {}
         if type.device is not None:
-            return {"memref.on_device": UnitAttr()}
-        return {}
+            attrs["memref.on_device"] = UnitAttr()
+        if type.const:
+            attrs["memref.const"] = UnitAttr()
+        return attrs
 
     def _np_types_spec(
         self, types: list[MemRefType]

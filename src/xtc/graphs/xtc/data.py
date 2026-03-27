@@ -34,10 +34,12 @@ class XTCTensorType(TensorType):
         shape: ShapeType = None,
         dtype: DataType = None,
         device: AcceleratorDevice | None = None,
+        const: bool = False,
     ):
         self._shape = shape
         self._dtype = dtype
         self._device = device
+        self._const = const
 
     @property
     @override
@@ -53,6 +55,10 @@ class XTCTensorType(TensorType):
     @override
     def device(self) -> AcceleratorDevice | None:
         return self._device
+
+    @property
+    def const(self) -> bool:
+        return self._const
 
     @property
     @override
@@ -113,13 +119,18 @@ class XTCTensorType(TensorType):
         else:
             dims = "x".join([str(d if d else "?") for d in self._shape])
         dtype = self._dtype if self._dtype else "?"
-        return f"{dims}x{dtype}"
+        const = ", const" if self.const else ""
+        return f"{dims}x{dtype}{const}"
 
     @override
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, XTCTensorType):
             return NotImplemented
-        return self.dtype == other.dtype and self.shape == other.shape
+        return (
+            self.dtype == other.dtype
+            and self.shape == other.shape
+            and self.const == other.const
+        )
 
 
 class XTCConstantTensorType(XTCTensorType, ConstantTensorType):
