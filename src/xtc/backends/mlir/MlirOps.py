@@ -84,6 +84,10 @@ class MlirOperation:
         dtype = xtc_op.inputs_types[0].dtype  # TODO: currently get dtype from 1st arg
         args = tuple([*dims, dtype])
         attrs = xtc_op.attrs
+        if xtc_op.name == "matmul":
+            transpose_a = xtc_op.inputs_types[0].layout == [1, 0]
+            transpose_b = xtc_op.inputs_types[1].layout == [1, 0]
+            args = tuple([*args, transpose_a, transpose_b])
         return MlirOperation(
             MlirOperators.from_name(xtc_op.name),
             args,
@@ -138,14 +142,14 @@ class MlirOperatorMatmul(MlirOperator):
 
     @override
     def dims_sizes(self) -> dict[str, int]:
-        i, j, k, _ = self.args
+        i, j, k, _, _, _ = self.args
         return {"i": i, "j": j, "k": k}
 
     @override
     def generate_op(
         self, block: Block | None = None, args: Sequence[BlockArgument] = []
     ) -> tuple[Block, OpAttrs]:
-        Ki, Kj, Kk, dtype = self.args
+        Ki, Kj, Kk, dtype, transpose_a, transpose_b = self.args
         elt_type = {"float16": f16, "float32": f32, "float64": f64}[dtype]
         elt_size = {"float16": 16, "float32": 32, "float64": 64}[dtype]
         if block is None:
@@ -163,11 +167,49 @@ class MlirOperatorMatmul(MlirOperator):
                 inputs=(cst0.results[0],),
                 outputs=(args[2],),
             )
-            reduce = linalg.MatmulOp(
-                res=(),
-                inputs=(args[0], args[1]),
-                outputs=(args[2],),
-            )
+            if not transpose_a and not transpose_b:
+                reduce = linalg.MatmulOp(
+                    res=(),
+                    inputs=(args[0], args[1]),
+                    outputs=(args[2],),
+                )
+            else:
+                iterator_types = [
+                    StringAttr("parallel"),
+                    StringAttr("parallel"),
+                    StringAttr("reduction"),
+                ]
+                index_map_a = lambda i, j, k: (i, k)
+                index_map_b = lambda i, j, k: (k, j)
+                index_map_c = lambda i, j, k: (i, j)
+                if transpose_a:
+                    index_map_a = lambda i, j, k: (k, i)
+                if transpose_b:
+                    index_map_b = lambda i, j, k: (j, k)
+                elt_type = {"float16": f16, "float32": f32, "float64": f64}[dtype]
+                block_in = Block(arg_types=[elt_type, elt_type, elt_type])
+                with ImplicitBuilder(block_in):
+                    mul = arith.MulfOp(block_in.args[0], block_in.args[1])
+                    add = arith.AddfOp(block_in.args[2], mul)
+                    linalg.YieldOp(add)
+                reduce = linalg.GenericOp(
+                    inputs=(args[0], args[1]),
+                    outputs=(args[2],),
+                    body=Region([block_in]),  # type: ignore # mypy issue with dataclass
+                    # ignore typing due to xdsl hints limitation
+                    indexing_maps=[
+                        AffineMapAttr(
+                            AffineMap.from_callable(index_map_a)
+                        ),
+                        AffineMapAttr(
+                            AffineMap.from_callable(index_map_b)
+                        ),
+                        AffineMapAttr(
+                            AffineMap.from_callable(index_map_c)
+                        ),
+                    ],
+                    iterator_types=iterator_types,
+                )
         fill_node_id = f"{self.name}_0"
         reduce_node_id = f"{self.name}"
         fill.attributes[f"__xtc_id_{fill_node_id}_"] = UnitAttr()

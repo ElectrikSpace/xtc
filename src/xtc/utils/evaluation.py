@@ -36,6 +36,7 @@ def graph_np_inputs_spec(graph: Graph) -> Callable[[], list[dict[str, Any]]]:
                 "shape": type.constant_shape,
                 "dtype": type.constant_dtype,
                 "device": type.device,
+                "layout": type.layout
             }
             for type in inputs_types
         ]
@@ -87,11 +88,13 @@ def ensure_ndarray_parameters(
         outputs_spec = np_outputs_spec()
         out_init = np.zeros if init_zero else np.empty
         inputs = [
-            (np_init(**spec), spec["device"] if "device" in spec else HostRuntime.get())
+            (np_init(**spec),
+             spec["device"] if "device" in spec else HostRuntime.get(),
+             spec["layout"] if "layout" in spec else None)
             for spec in inputs_spec
         ]
         outputs = [
-            out_init(**{k: v for k, v in spec.items() if k != "device"})
+            out_init(**{k: v for k, v in spec.items() if k != "device" and k != "layout"})
             for spec in outputs_spec
         ]
         parameters = (

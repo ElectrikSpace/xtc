@@ -71,6 +71,7 @@ class MlirGraphBackend(MlirBackend):
         self, node: XTCNode, block: Block, variables: dict[str, Any]
     ):
         operation = MlirOperation.from_operation(node.operation, name=node.name)
+        print(operation)
         names = [*node.inputs, *node.outputs]
         assert node.inputs_types is not None and node.outputs_types is not None
         types = [*node.inputs_types, *node.outputs_types]
@@ -153,6 +154,9 @@ class MlirGraphBackend(MlirBackend):
 
     def _xdsl_type_from_tensortype(self, type: XTCTensorType) -> Any:
         elt_type, shape = self._xdsl_elt_shape_from_tensortype(type)
+        layout = type.layout
+        if layout is not None:
+            shape = [shape[idx] for idx in layout]
         return MemRefType(elt_type, shape)
 
     def _xdsl_attrs_from_tensortype(self, type: XTCTensorType):
