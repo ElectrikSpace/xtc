@@ -345,5 +345,10 @@ class JIRScheduler(itf.schd.Scheduler):
         # TODO: not implemented for now
         pass
 
+    @override
+    def reshape(self, input_idx: int, new_shape: list[int], root: str = DEFAULT_ROOT) -> None:
+        # TODO: not implemented for now
+        pass
+
     def get_schedule_str(self) -> str:
         return str(JIRSchedule(scheduler=self))

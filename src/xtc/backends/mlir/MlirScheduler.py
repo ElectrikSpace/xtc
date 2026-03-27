@@ -208,6 +208,11 @@ class MlirScheduler(itf.schd.Scheduler):
             axis, input_idx, memory_axes, root=root
         )
 
+    @override
+    def reshape(self, input_idx: int, new_shape: list[int], root: str = DEFAULT_ROOT) -> None:
+        # TODO Not yet implemented
+        pass
+
 
 class MlirSchedule(itf.schd.Schedule):
     def __init__(
