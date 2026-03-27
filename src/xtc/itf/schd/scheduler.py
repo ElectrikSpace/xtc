@@ -288,3 +288,14 @@ class Scheduler(ABC):
             root: the parent split (or the operator's absolute root)
         """
         ...
+
+    @abstractmethod
+    def reshape(self, input_idx: int, new_shape: list[int], root: str = DEFAULT_ROOT) -> None:
+        """Reshape a buffer at a given level.
+
+        Args:
+            input_idx: input buffer index for the scheduled computation
+            new_shape: new shape for the buffer
+            root: the parent split (or the operator's absolute root)
+        """
+        ...
