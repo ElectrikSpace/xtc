@@ -83,6 +83,7 @@ class MlirMppaTarget(MlirTarget):
         c_accelerator_dump_file = f"{dump_base}.accelerator.c"
         obj_host_dump_file = f"{dump_base}.host.o"
         obj_accelerator_dump_file = f"{dump_base}.accelerator.o"
+        obj_traces_dump_file = f"{dump_base}.traces.o"
         so_dump_file = f"{dump_file}.{get_shlib_extension()}"
         kvx_so_dump_file = f"{dump_file}.kvx.so"
 
@@ -128,12 +129,14 @@ class MlirMppaTarget(MlirTarget):
             c_host_dump_file=c_host_dump_file,
             obj_host_dump_file=obj_host_dump_file,
             kvx_so_dump_file=kvx_so_dump_file,
+            obj_traces_dump_file=obj_traces_dump_file,
         )
 
         # Link final shared library
         self._mlir_mppa_backend.link_shared_library(
             obj_host_dump_file=obj_host_dump_file,
             obj_accelerator_dump_file=obj_accelerator_dump_file,
+            obj_traces_dump_file=obj_traces_dump_file,
             so_dump_file=so_dump_file,
         )
 
@@ -145,6 +148,7 @@ class MlirMppaTarget(MlirTarget):
             os.remove(c_accelerator_dump_file)
             os.remove(obj_host_dump_file)
             os.remove(obj_accelerator_dump_file)
+            os.remove(obj_traces_dump_file)
 
     @override
     def create_module(
@@ -218,7 +222,6 @@ class MlirProgramToMlirMppaPass:
         passes.append("sdist-remove-intermediate-subview-ops")
         passes.append("convert-sdist-to-mppa{reverse-reads=true}")
         passes.append("convert-sdist-utils-to-mppa")
-
         new_passes = []
         for p in passes:
             new_passes.append(p)
@@ -264,6 +267,10 @@ class MlirMppaBackend:
     @property
     def cmd_kvx_cc(self):
         return [f"{self._csw_path}/bin/kvx-cos-gcc"]
+
+    @property
+    def cmd_kvx_trace_util(self):
+        return [f"{self._csw_path}/bin/kvx-trace-util"]
 
     @property
     def cmd_host_cc(self):
@@ -338,10 +345,14 @@ class MlirMppaBackend:
         passes.append("convert-math-to-libm")
         passes.append("func.func(lower-affine)")
         passes.append("cse")
-        # TODO Enable Mppa traces
-        # if config.mppa_trace_enable:
-        #    passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.launch})")
-        #    passes.append("kalray-apply-instrumentation{use-traces=" + str(config.mppa_trace_enable) + "}")
+        #passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.static_alloc})")
+        #passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.static_dealloc})")
+        #passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.barrier})")
+        #passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.dma_sync_noc})")
+        #passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.dma_wait})")
+        #passes.append("func.func(kalray-request-benchmarks{target-op=kvxpe.launch})")
+        #passes.append("func.func(kalray-request-benchmarks{target-op=libtensors.f16_matmul})")
+        #passes.append("kalray-apply-instrumentation{use-traces=true}")
         passes.append("func.func(kvxcluster-outline-kernels{specialize=true})")
         passes.append("func.func(canonicalize)")
 
@@ -406,6 +417,7 @@ class MlirMppaBackend:
             "-DBUILD_ID=0",
             "-fvect-cost-model=cheap",
             "-fstack-limit-register=sr",
+            "-DMPPA_TRACE_ENABLE", # FIXME put under an option
             "-c",
             c_accelerator_dump_file,
             "-o",
@@ -424,6 +436,8 @@ class MlirMppaBackend:
             self._mlir_mppa_path + "/include/libtensors/libtensor_tests_kernel_2.o"
         )  # FIXME test
         cmd = self.cmd_kvx_cc + [
+            "-DMPPA_TRACE_ENABLE", # FIXME put under an option
+            "-lmppatrace", # FIXME put under an option
             "-shared",
             "-fPIC",
             "-march=kv3-2",
@@ -436,13 +450,26 @@ class MlirMppaBackend:
         ]
         exe_process = self._execute_command(cmd=cmd)
         assert exe_process.returncode == 0
+        # Enable traces
+        #cmd = self.cmd_kvx_trace_util + [
+        #    "-s1",
+        #    "-t",
+        #    "\"kmt_kernel_0/.*\"",
+        #    kvx_so_dump_file,
+        #]
+        #exe_process = self._execute_command(cmd=cmd)
+        #assert exe_process.returncode == 0
+        os.system(self.cmd_kvx_trace_util[0] + " -s1 -t \"kmt_kernel_0/.*\" " + kvx_so_dump_file)
+        #os.system(self.cmd_kvx_trace_util[0] + " -d long " + kvx_so_dump_file)
 
     def compile_c_host(
-        self, c_host_dump_file: str, obj_host_dump_file: str, kvx_so_dump_file: str
+        self, c_host_dump_file: str, obj_host_dump_file: str, kvx_so_dump_file: str, obj_traces_dump_file: str
     ) -> None:
+        # generated host c code
         cmd = self.cmd_host_cc + [
             "-O2",
             "-fPIC",
+            "-DMPPA_TRACE_ENABLE", # FIXME put under an option
             "-Wall",
             "-Wextra",
             "-I" + self._mlir_mppa_path + "/include",
@@ -456,15 +483,34 @@ class MlirMppaBackend:
         ]
         exe_process = self._execute_command(cmd=cmd)
         assert exe_process.returncode == 0
+        # traces
+        cmd = self.cmd_host_cc + [
+            "-DMPPA_TRACE_ENABLE", # FIXME put under an option
+            "-O2",
+            "-fPIC",
+            "-Wall",
+            "-Wextra",
+            "-I" + self._mlir_mppa_path + "/include",
+            "-I" + self._csw_path + "/include",
+            "-DTARGET_KV3_2",
+            '-DKERNEL_PATHNAME="' + kvx_so_dump_file + '"',
+            "-c",
+            self._mlir_mppa_path + "/src/runtime/traces.c",
+            "-o",
+            obj_traces_dump_file,
+        ]
+        exe_process = self._execute_command(cmd=cmd)
+        assert exe_process.returncode == 0
 
     def link_shared_library(
-        self, obj_host_dump_file: str, obj_accelerator_dump_file: str, so_dump_file: str
+        self, obj_host_dump_file: str, obj_accelerator_dump_file: str, obj_traces_dump_file: str, so_dump_file: str
     ) -> None:
         cmd = self.cmd_host_cc + [
             "-shared",
             "-fPIC",
             "-O2",
             obj_host_dump_file,
+            obj_traces_dump_file,
             "-o",
             so_dump_file,
             "-Wl,-rpath,$ORIGIN/../lib",
