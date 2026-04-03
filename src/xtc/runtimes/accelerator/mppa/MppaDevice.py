@@ -73,6 +73,7 @@ def _execute_command(
 def _compile_kvx_object(device: "MppaDevice", src_file: str, obj_file: str):
     cmd_kvx_cc = [f"{device._csw_path}/bin/kvx-cos-gcc"]
     cmd = cmd_kvx_cc + [
+        "-DMPPA_TRACE_ENABLE", # FIXME put under an option
         "-O2",
         "-fPIC",
         f"-I{device._mlir_mppa_path}/include",
@@ -101,6 +102,7 @@ def _compile_host_object(
             f"-I{device._csw_path}/include",
             f"-I{_get_csrcs_dir_mppa()}",
             f"-I{_get_csrcs_dir_host()}",
+            "-DMPPA_TRACE_ENABLE", # FIXME put under an option
             "-DACCELERATOR_NAME=mppa",
             "-DNB_CC=5",
             "-DTARGET_KV3_2",
@@ -140,6 +142,8 @@ def _compile_runtime_lib(device: "MppaDevice") -> LibLoader:
     # Link KVX objects
     cmd_kvx_cc = [f"{device._csw_path}/bin/kvx-cos-gcc"]
     cmd_kvx_link = cmd_kvx_cc + [
+        "-DMPPA_TRACE_ENABLE", # FIXME put under an option
+        "-lmppatrace", # FIXME put under an option
         "-shared",
         "-fPIC",
         "-march=kv3-2",
@@ -152,6 +156,8 @@ def _compile_runtime_lib(device: "MppaDevice") -> LibLoader:
         cmd=cmd_kvx_link, debug=device.config.mlir_config.debug
     )
     assert exe_process.returncode == 0
+    os.system(device._csw_path + "/bin/kvx-trace-util -s1 -t \"kmt/.*\" " + device.config.work_dir + "/mppa_runtime_acc.so")
+    #os.system(device._csw_path + "/bin/kvx-trace-util -d long " + device.config.work_dir + "/mppa_runtime_acc.so")
 
     # Compile host objects
     has_pfm = ctypes.util.find_library("pfm") is not None
