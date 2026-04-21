@@ -87,7 +87,15 @@ class MlirOperation:
         if xtc_op.name == "matmul":
             transpose_a = xtc_op.inputs_types[0].layout == [1, 0]
             transpose_b = xtc_op.inputs_types[1].layout == [1, 0]
-            args = tuple([*args, transpose_a, transpose_b])
+            in_dtype = xtc_op.inputs_types[0].dtype
+            acc_dtype = xtc_op.outputs_types[0].dtype
+            args = tuple([*dims, in_dtype, acc_dtype, transpose_a, transpose_b])
+            return MlirOperation(
+                MlirOperators.from_name(xtc_op.name),
+                args,
+                dict(attrs),
+                name=name,
+            )
         return MlirOperation(
             MlirOperators.from_name(xtc_op.name),
             args,
@@ -142,32 +150,40 @@ class MlirOperatorMatmul(MlirOperator):
 
     @override
     def dims_sizes(self) -> dict[str, int]:
-        i, j, k, _, _, _ = self.args
+        i, j, k, *_ = self.args
         return {"i": i, "j": j, "k": k}
 
     @override
     def generate_op(
         self, block: Block | None = None, args: Sequence[BlockArgument] = []
     ) -> tuple[Block, OpAttrs]:
-        Ki, Kj, Kk, dtype, transpose_a, transpose_b = self.args
-        elt_type = {"float16": f16, "float32": f32, "float64": f64}[dtype]
-        elt_size = {"float16": 16, "float32": 32, "float64": 64}[dtype]
+        Ki, Kj, Kk, input_dtype, acc_dtype, transpose_a, transpose_b = self.args
+        str_to_builtin = {"float16": f16, "float32": f32, "float64": f64}
+        str_to_bits = {"float16": 16, "float32": 32, "float64": 64}
+        in_elt = str_to_builtin[input_dtype]
+        acc_elt = str_to_builtin[acc_dtype]
+        acc_bits = str_to_bits[acc_dtype]
         if block is None:
             ops_types = [
-                MemRefType(elt_type, shape) for shape in [[Ki, Kk], [Kk, Kj], [Ki, Kj]]
+                MemRefType(in_elt, [Ki, Kk]),
+                MemRefType(in_elt, [Kk, Kj]),
+                MemRefType(acc_elt, [Ki, Kj]),
             ]
             block = Block(arg_types=ops_types)
             args = block.args
         assert len(args) == 3
         assert all(isinstance(arg.type, MemRefType) for arg in args)
+        use_linalg_matmul = (
+            not transpose_a and not transpose_b and input_dtype == acc_dtype
+        )
         with ImplicitBuilder(block):
-            cst0 = arith.ConstantOp(builtin.FloatAttr(0, elt_size))
+            cst0 = arith.ConstantOp(builtin.FloatAttr(0, acc_bits))
             fill = linalg.FillOp(
                 res=(),
                 inputs=(cst0.results[0],),
                 outputs=(args[2],),
             )
-            if not transpose_a and not transpose_b:
+            if use_linalg_matmul:
                 reduce = linalg.MatmulOp(
                     res=(),
                     inputs=(args[0], args[1]),
@@ -186,11 +202,14 @@ class MlirOperatorMatmul(MlirOperator):
                     index_map_a = lambda i, j, k: (k, i)
                 if transpose_b:
                     index_map_b = lambda i, j, k: (j, k)
-                elt_type = {"float16": f16, "float32": f32, "float64": f64}[dtype]
-                block_in = Block(arg_types=[elt_type, elt_type, elt_type])
+                block_in = Block(arg_types=[in_elt, in_elt, acc_elt])
                 with ImplicitBuilder(block_in):
                     mul = arith.MulfOp(block_in.args[0], block_in.args[1])
-                    add = arith.AddfOp(block_in.args[2], mul)
+                    if input_dtype == acc_dtype:
+                        add = arith.AddfOp(block_in.args[2], mul)
+                    else:
+                        ext = arith.ExtFOp(mul, acc_elt)
+                        add = arith.AddfOp(block_in.args[2], ext)
                     linalg.YieldOp(add)
                 reduce = linalg.GenericOp(
                     inputs=(args[0], args[1]),
@@ -228,13 +247,13 @@ class MlirOperatorMatmul(MlirOperator):
 
     @override
     def inputs_dims(self) -> tuple[tuple[int, ...], ...]:
-        i, j, k, _ = self.args
+        i, j, k, *_ = self.args
         return (i, k), (k, j)
 
     @override
     def inputs_types(self) -> tuple[str, ...]:
-        dtype = self.args[-1]
-        return dtype, dtype
+        input_dtype = self.args[3]
+        return input_dtype, input_dtype
 
     @override
     def outputs_dims(self) -> tuple[tuple[int, ...], ...]:
@@ -243,8 +262,8 @@ class MlirOperatorMatmul(MlirOperator):
 
     @override
     def outputs_types(self) -> tuple[str, ...]:
-        dtype = self.args[-1]
-        return (dtype,)
+        acc_dtype = self.args[4]
+        return (acc_dtype,)
 
 
 @irdl_op_definition

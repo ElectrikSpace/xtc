@@ -176,16 +176,26 @@ class XTCOperMatmul(XTCOperator):
         assert k == bk, (
             f"incompatible dimension k for matmul inputs shapes: ({i}, {k}) ({bk}, {j})"
         )
+        out_dtype = getattr(self.attrs, "dtype", None)
+        if out_dtype is None:
+            out_dtype = inputs_types[0].dtype
         return [
-            XTCTensorType(
-                shape=(i, j), dtype=inputs_types[0].dtype, device=self.device
-            ),
+            XTCTensorType(shape=(i, j), dtype=out_dtype, device=self.device),
         ]
 
     @override
     def forward(self, inputs: Sequence[Tensor]) -> Sequence[XTCTensor]:
-        matmul = XTCTensor(np.matmul(inputs[0].numpy(), inputs[1].numpy()))
         expected_type = self.forward_types([inp.type for inp in inputs])[0]
+        np_acc = np.dtype(expected_type.constant_dtype)
+        a = inputs[0].numpy().astype(np_acc)
+        b = inputs[1].numpy().astype(np_acc)
+        out = np.matmul(a, b).astype(np_acc)
+        matmul = XTCTensor(out)
+        matmul._type = XTCTensorType(
+            shape=out.shape,
+            dtype=expected_type.constant_dtype,
+            device=expected_type.device,
+        )
         assert matmul.type == expected_type, (
             f"output type mismatch expect: {matmul.type} != {expected_type}"
         )
