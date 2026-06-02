@@ -4,6 +4,8 @@
 #
 from typing import cast
 from dataclasses import dataclass
+
+import numpy as np
 from mlir.dialects import transform
 from mlir.dialects.transform import (
     NamedSequenceOp,
@@ -40,6 +42,8 @@ from xtc.utils.ext_tools import transform_opts
 from .MlirProgram import RawMlirProgram
 from .MlirScheduler import MlirSchedule, MlirNodeSchedule
 from .MlirTarget import MlirTarget
+from .MlirNodeScheduler import PackedBufferEntry
+from .MlirPackOperandShape import tiled_tensor_shape_for_input
 
 _VECTO_SEQ_NAME = "_vecto"
 _SUPER_VECTORIZE_SEQ_NAME = "_super_vectorize"
@@ -310,6 +314,8 @@ class MlirProgramInsertTransformPass:
                     loop_name=loop_name,
                     schedule=schedule,
                     sched_state=sched_state,
+                    root=root,
+                    tiles_sizes_by_loops=tiles_sizes_by_loops,
                 )
             if loop_name in schedule.write_buffers:
                 self._write_buffer(
@@ -341,6 +347,47 @@ class MlirProgramInsertTransformPass:
             self._unroll(permutation, schedule, sched_state)
 
         return sched_state
+
+    def _resolve_local_pack_padding(
+        self,
+        schedule: MlirNodeSchedule,
+        entry: PackedBufferEntry,
+        *,
+        root: str,
+        pack_loop: str,
+        tiles_sizes_by_loops: dict[str, list[int]],
+    ) -> tuple[int, tuple[tuple[str, int], ...]]:
+        """Return input index and abstract per-dimension slack for ``local_buffer_at``."""
+        from .MlirGraphBackend import MlirGraphBackend
+        from .MlirNodeBackend import MlirNodeBackend
+
+        assert self._mlir_schedule is not None
+        graph_backend = cast(MlirGraphBackend, self._mlir_schedule.scheduler.backend)
+        node_backend = cast(MlirNodeBackend, graph_backend.nodes[schedule.node_name])
+        specs = node_backend.np_inputs_spec()
+
+        if isinstance(entry, int):
+            return entry, tuple((d, 0) for d in schedule.dims)
+
+        input_idx, wants_heuristic = entry
+        assert wants_heuristic is True
+        dtype_str = specs[input_idx]["dtype"]
+        byte_width = int(np.dtype(dtype_str).itemsize)
+        buffer_shape = tiled_tensor_shape_for_input(
+            schedule,
+            root=root,
+            pack_loop=pack_loop,
+            tiles_sizes_by_loops=tiles_sizes_by_loops,
+            node_backend=node_backend,
+            input_idx=input_idx,
+        )
+        hinted = self._target.pack_at_padding_heuristic(
+            schedule_dims=schedule.dims,
+            input_idx=input_idx,
+            input_element_bytewidth=byte_width,
+            input_buffer_shape=buffer_shape,
+        )
+        return input_idx, tuple((d, int(hinted.get(d, 0))) for d in schedule.dims)
 
     def _generate_tiling_insns(
         self, schedule: MlirNodeSchedule
@@ -528,10 +575,24 @@ class MlirProgramInsertTransformPass:
         loop_name: str,
         schedule: MlirNodeSchedule,
         sched_state: SchedulingState,
+        *,
+        root: str,
+        tiles_sizes_by_loops: dict[str, list[int]],
     ):
         with InsertionPoint(transform.ApplyPatternsOp(sched_state.handle).patterns):
             memref.ApplyFoldMemrefAliasOpsPatternsOp()
-        for input_idx in schedule.packed_buffers[loop_name]:
+        for entry in schedule.packed_buffers[loop_name]:
+            input_idx, pad_by_dim = self._resolve_local_pack_padding(
+                schedule,
+                entry,
+                root=root,
+                pack_loop=loop_name,
+                tiles_sizes_by_loops=tiles_sizes_by_loops,
+            )
+            if any(slack != 0 for _, slack in pad_by_dim):
+                raise NotImplementedError(
+                    "transform.sdist.local_buffer_at padding is not yet implemented in mlir_sdist"
+                )
             if "sdist" in self._mlir_program.mlir_extensions:
                 assert sdist_transform is not None
                 sdist_transform.SDistLocalBufferAtOp(

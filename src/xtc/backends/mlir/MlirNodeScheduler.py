@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+from typing import Literal
+
 from typing_extensions import override
 from dataclasses import dataclass, asdict
 from pprint import pformat
@@ -10,9 +12,14 @@ from xtc.itf.schd.scheduler import DEFAULT_ROOT
 __all__ = [
     "MlirNodeScheduler",
     "MlirNodeSchedule",
+    "PackedBufferEntry",
 ]
 
 ROOT_SEP = "/"
+
+# Bare index: no padding request. ``(input_idx, True)``: padding slack is derived at
+# compile time via :meth:`MlirTarget.pack_at_padding_heuristic`.
+PackedBufferEntry = int | tuple[int, Literal[True]]
 
 
 def basename(loop_name: str) -> str:
@@ -31,7 +38,7 @@ class MlirNodeSchedule:
     vectorization: list[str]
     parallelization: list[str]
     unrolling: dict[str, int]
-    packed_buffers: dict[str, list[int]]
+    packed_buffers: dict[str, list[PackedBufferEntry]]
     write_buffers: list[str]
     memory_mesh: dict[str, int]
     processor_mesh: dict[str, int]
@@ -92,7 +99,7 @@ class MlirNodeScheduler:
         self.vectorization: list[str] = []
         self.parallelization: list[str] = []
         self.unrolling: dict[str, int] = {}
-        self.packed_buffers: dict[str, list[int]] = {}
+        self.packed_buffers: dict[str, list[PackedBufferEntry]] = {}
         self.write_buffers: list[str] = []
         self.memory_mesh: dict[str, int] = {}
         self.processor_mesh: dict[str, int] = {}
@@ -179,7 +186,9 @@ class MlirNodeScheduler:
     ):
         axis_key = f"{root}{ROOT_SEP}{axis}"
         if axis_key not in self.packed_buffers.keys():
-            self.packed_buffers[axis_key] = [input_idx]
+            self.packed_buffers[axis_key] = []
+        if pad is True:
+            self.packed_buffers[axis_key].append((input_idx, True))
         else:
             self.packed_buffers[axis_key].append(input_idx)
 

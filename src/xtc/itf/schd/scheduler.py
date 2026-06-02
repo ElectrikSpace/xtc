@@ -201,14 +201,14 @@ class Scheduler(ABC):
         A packed read buffer is created for the given input buffer index.
         The buffer memory type can be specified or defaults
         to the local memory at this level.
-        When pad is true, a padding strategy is applied in order to reduce
-        sets/banks conflicts.
+        When ``pad`` is true, backends that support padding (e.g. MLIR + SDist)
+        may apply a target-specific heuristic when lowering the schedule.
 
         Args:
             axis: localisation of the write buffer
             input_idx: input buffer index for the scheduled computation
             mtype: buffer memory type for the allocation
-            pad: whether to add padding or not
+            pad: whether to request padded packing when supported
             root: the parent split (or the operator's absolute root)
         """
         ...
