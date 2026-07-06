@@ -13,6 +13,7 @@ from typing_extensions import override
 from .exceptions import ScheduleParseError
 
 literal = int | str
+ansor_tile = "PRTUOWF"
 
 
 def toliteral(s: str) -> literal:
@@ -97,7 +98,21 @@ class AxisDecl:
     annotations: Annotations
 
 
-ScheduleItem = SplitDecl | TileDecl | AxisDecl
+@dataclass(frozen=True)
+class PRTDecl:
+    """AST Type: Ansor-style tile declarations"""
+
+    shape: str
+    annotations: Annotations
+
+    def __post__init__(self):
+        for s in self.shape:
+            if s not in ansor_tile:
+                # Should be unreachable
+                raise ScheduleParseError(f"Invalid tile declaration {s}")
+
+
+ScheduleItem = SplitDecl | TileDecl | AxisDecl | PRTDecl
 
 
 @dataclass(frozen=True)
@@ -135,6 +150,9 @@ class ScheduleParser:
         if "#" in declaration:
             return self._parse_tile(declaration, value)
 
+        if declaration[0] in ansor_tile:
+            return self._parse_ansor_tile(declaration, value)
+
         # Must be a direct axis reference
         return self._parse_axis_ref(declaration, value)
 
@@ -159,6 +177,12 @@ class ScheduleParser:
 
         annotations = self._parse_annotations(value, declaration)
         return TileDecl(axis=axis_name, size=size, annotations=annotations)
+
+    def _parse_ansor_tile(self, declaration: str, value: dict) -> PRTDecl:
+        """Parse an ansor-style tile reference."""
+
+        annotations = self._parse_annotations(value, declaration)
+        return PRTDecl(shape=declaration, annotations=annotations)
 
     def _parse_axis_ref(self, declaration: str, value: dict) -> AxisDecl:
         """Parse a direct axis reference."""
@@ -326,7 +350,7 @@ class ScheduleParser:
 class YAMLParser:
     """Parses a YAML specification into a dict-based schedule specification."""
 
-    def parse(self, spec: str):
+    def parse(self, spec: str) -> dict[str, dict[str, Any]]:
         """Parses a YAML specification into a dict-based schedule specification."""
         descript_spec = strictyaml.load(spec).data
         if not isinstance(descript_spec, dict):
