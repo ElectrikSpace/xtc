@@ -65,6 +65,46 @@ def test_cpp_export_matmul(tmp_path: Path) -> None:
 
 @requires_mlir
 @pytest.mark.skipif(sys.platform != "linux", reason="cpp export integration test (linux)")
+def test_cpp_export_matmul_runtime_validate(tmp_path: Path) -> None:
+    impl = matmul_impl(I, J, K, DTYPE, "matmul_export_rt")
+    sch = impl.get_scheduler()
+    sch.set_dims(["i", "j", "k"])
+    sched = sch.schedule()
+
+    comp = impl.get_compiler(ar_lib=True, dump_file=str(tmp_path / "matmul_export_rt"))
+    module = comp.compile(sched)
+
+    export_dir = tmp_path / "export_rt"
+    module.export(export_dir, runtime_validate=True, seed=7)
+
+    assert not (export_dir / "data").exists()
+    test_cpp = (export_dir / "test.cpp").read_text(encoding="utf-8")
+    assert "fill_random_inputs" in test_cpp
+    assert "reference_matmul" in test_cpp
+    assert "load_binary" not in test_cpp
+
+    build = subprocess.run(
+        ["make", "test"],
+        cwd=export_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert build.returncode == 0, f"make failed:\n{build.stdout}\n{build.stderr}"
+
+    run = subprocess.run(
+        ["./test"],
+        cwd=export_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == 0, f"test binary failed:\n{run.stdout}\n{run.stderr}"
+    assert "All checks passed." in run.stdout
+
+
+@requires_mlir
+@pytest.mark.skipif(sys.platform != "linux", reason="cpp export integration test (linux)")
 @pytest.mark.skipif(
     shutil.which("aarch64-linux-gnu-g++") is None
     and shutil.which("aarch64-linux-gnu-gcc") is None,

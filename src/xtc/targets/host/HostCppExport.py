@@ -18,6 +18,8 @@ from xtc.utils.ext_tools import get_shlib_extension
 from xtc.utils.host_tools import cross_cxx, is_native_arch
 from xtc.utils.numpy import np_init
 
+from .HostCppReferenceGen import generate_runtime_reference_cpp
+
 if TYPE_CHECKING:
     from .HostModule import HostModule
 
@@ -63,6 +65,7 @@ class HostCppExporter:
         seed: int = 0,
         cxx: str | None = None,
         arch: str | None = None,
+        runtime_validate: bool = False,
     ) -> None:
         self._module = module
         self._out_dir = out_dir
@@ -70,6 +73,7 @@ class HostCppExporter:
         self._seed = seed
         self._cxx = cxx
         self._export_arch = arch
+        self._runtime_validate = runtime_validate
 
     def export(self) -> None:
         inputs_spec_fn = self._module._np_inputs_spec
@@ -98,11 +102,13 @@ class HostCppExporter:
         self._out_dir.mkdir(parents=True, exist_ok=True)
         (self._out_dir / "include").mkdir(exist_ok=True)
         (self._out_dir / "lib").mkdir(exist_ok=True)
-        (self._out_dir / "data" / "inputs").mkdir(parents=True, exist_ok=True)
-        (self._out_dir / "data" / "outputs").mkdir(parents=True, exist_ok=True)
+        if not self._runtime_validate:
+            (self._out_dir / "data" / "inputs").mkdir(parents=True, exist_ok=True)
+            (self._out_dir / "data" / "outputs").mkdir(parents=True, exist_ok=True)
 
         self._copy_library()
-        self._write_golden_data(input_args, output_args, reference_impl)
+        if not self._runtime_validate:
+            self._write_golden_data(input_args, output_args, reference_impl)
         self._write_header(input_args, output_args)
         self._write_test_cpp(input_args, output_args)
         self._write_makefile()
@@ -217,6 +223,14 @@ void {payload}({params});
     def _write_test_cpp(
         self, input_args: list[_TensorArg], output_args: list[_TensorArg]
     ) -> None:
+        if self._runtime_validate:
+            self._write_runtime_test_cpp(input_args, output_args)
+        else:
+            self._write_golden_test_cpp(input_args, output_args)
+
+    def _write_golden_test_cpp(
+        self, input_args: list[_TensorArg], output_args: list[_TensorArg]
+    ) -> None:
         payload = self._module.payload_name
         header = self._export_name
         all_args = input_args + output_args
@@ -322,6 +336,112 @@ int main() {{
 """
         (self._out_dir / "test.cpp").write_text(content, encoding="utf-8")
 
+    def _write_runtime_test_cpp(
+        self, input_args: list[_TensorArg], output_args: list[_TensorArg]
+    ) -> None:
+        graph = self._module._graph
+        if graph is None:
+            raise ValueError("runtime_validate export requires a graph module")
+
+        payload = self._module.payload_name
+        header = self._export_name
+        all_args = input_args + output_args
+        c_types = {a.c_type for a in all_args}
+        if len(c_types) != 1:
+            raise NotImplementedError(
+                "export test.cpp requires a single floating-point dtype across all tensors"
+            )
+        c_type = c_types.pop()
+
+        name_to_c_name = {arg.name: arg.c_name for arg in all_args}
+        name_to_shape = {arg.name: arg.shape for arg in all_args}
+        helpers, reference_body, output_ref_vars = generate_runtime_reference_cpp(
+            graph,
+            name_to_c_name,
+            name_to_shape,
+            [arg.c_name for arg in output_args],
+            c_type,
+        )
+
+        init_blocks: list[str] = []
+        ptr_names: list[str] = []
+        check_blocks: list[str] = []
+
+        for arg in input_args:
+            init_blocks.append(
+                f"    std::vector<{c_type}> {arg.c_name}({arg.numel});"
+                f"\n    fill_random_inputs({arg.c_name}, {self._seed});"
+            )
+            ptr_names.append(f"{arg.c_name}.data()")
+
+        for arg in output_args:
+            init_blocks.append(f"    std::vector<{c_type}> {arg.c_name}({arg.numel});")
+            ptr_names.append(f"{arg.c_name}.data()")
+
+        for arg, ref_var in zip(output_args, output_ref_vars):
+            check_blocks.append(
+                f"""\
+  {{
+    if (!allclose({arg.c_name}, {ref_var})) {{
+      std::cerr << "FAIL {arg.c_name}\\n";
+      return 1;
+    }}
+    std::cout << "OK {arg.c_name}\\n";
+  }}"""
+            )
+
+        init_src = "\n\n".join(init_blocks)
+        checks = "\n".join(check_blocks)
+        call_args = ", ".join(ptr_names)
+
+        content = f"""\
+#include "{header}.h"
+
+#include <cmath>
+#include <iostream>
+#include <random>
+#include <string>
+#include <vector>
+
+{helpers}
+
+template <typename T>
+bool allclose(const std::vector<T>& got, const std::vector<T>& ref,
+              T rtol = static_cast<T>(1e-5), T atol = static_cast<T>(1e-6)) {{
+  if (got.size() != ref.size()) {{
+    return false;
+  }}
+  for (size_t i = 0; i < got.size(); ++i) {{
+    const T diff = std::abs(got[i] - ref[i]);
+    const T tol = atol + rtol * std::abs(ref[i]);
+    if (diff > tol) {{
+      std::cerr << "  mismatch at index " << i << ": got=" << got[i]
+                << " ref=" << ref[i] << "\\n";
+      return false;
+    }}
+  }}
+  return true;
+}}
+
+int main() {{
+  try {{
+{init_src}
+
+{reference_body}
+
+    {payload}({call_args});
+
+{checks}
+    std::cout << "All checks passed.\\n";
+    return 0;
+  }} catch (const std::exception& ex) {{
+    std::cerr << "Error: " << ex.what() << "\\n";
+    return 1;
+  }}
+}}
+"""
+        (self._out_dir / "test.cpp").write_text(content, encoding="utf-8")
+
     def _load_vector_block(
         self, arg: _TensorArg, c_type: str, subdir: str, *, zero_init: bool = False
     ) -> str:
@@ -354,10 +474,11 @@ int main() {{
                 "-Wl,--whole-archive lib/lib$(NAME).a "
                 f"-Wl,--no-whole-archive {link_libs}"
             ).rstrip()
+            static_link_libs = self._arlib_link_libs()
             static_ldflags = (
                 "-pthread -static -Wl,--whole-archive lib/lib$(NAME).a "
-                "-Wl,--no-whole-archive"
-            )
+                f"-Wl,--no-whole-archive {static_link_libs}"
+            ).rstrip()
             static_targets = """\
 test-static: test.cpp
 \t$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@ $(STATIC_LDFLAGS)
@@ -381,7 +502,7 @@ run-static: test-static
             clean_extra = ""
         content = f"""\
 NAME      := {self._export_name}
-CXX       ?= {cxx}
+CXX       = {cxx}
 CXXFLAGS  ?= -O2 -std=c++17 -Wall -Wextra
 INCLUDES  := -Iinclude
 LDFLAGS   := {ldflags}
@@ -412,6 +533,18 @@ clean:
                 " — compiled shared library"
             )
             static_build = ""
+        if self._runtime_validate:
+            data_desc = (
+                "- `test.cpp` — generates random inputs at runtime, calls the "
+                "kernel, and checks against an embedded reference implementation"
+            )
+        else:
+            data_desc = (
+                "- `data/inputs/*.bin` / `data/outputs/*.bin` — golden inputs "
+                "and reference outputs\n"
+                "- `test.cpp` — loads golden data, calls the kernel, compares "
+                "against reference"
+            )
         content = f"""\
 # XTC exported kernel: {self._export_name}
 
@@ -426,7 +559,6 @@ make run
 
 - `include/{self._export_name}.h` — kernel declaration and tensor metadata macros
 - {lib_desc}
-- `data/inputs/*.bin` / `data/outputs/*.bin` — golden inputs and reference outputs
-- `test.cpp` — loads golden data, calls the kernel, compares against reference
+- {data_desc}
 """
         (self._out_dir / "README.md").write_text(content, encoding="utf-8")

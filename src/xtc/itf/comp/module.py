@@ -79,7 +79,8 @@ class Module(ABC):
         Args:
             out_dir: Destination directory for exported artifacts (header,
                 shared library, test harness, etc.).
-            kwargs: Target-specific options (e.g. export name, random seed).
+            kwargs: Target-specific options (e.g. export name, random seed,
+                runtime_validate).
         """
         ...
 

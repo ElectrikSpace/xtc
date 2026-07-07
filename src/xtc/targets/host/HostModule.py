@@ -106,6 +106,7 @@ class HostModule(itf.comp.Module):
         seed = kwargs.get("seed", 0)
         cxx = kwargs.get("cxx")
         arch = kwargs.get("arch")
+        runtime_validate = kwargs.get("runtime_validate", False)
         HostCppExporter(
             self,
             Path(out_dir),
@@ -113,6 +114,7 @@ class HostModule(itf.comp.Module):
             seed=seed,
             cxx=cxx,
             arch=arch,
+            runtime_validate=runtime_validate,
         ).export()
 
     @override
