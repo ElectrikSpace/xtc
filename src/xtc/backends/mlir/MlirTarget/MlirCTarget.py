@@ -13,6 +13,8 @@ from pathlib import Path
 
 from xtc.utils.host_tools import (
     disassemble,
+    binutils_command,
+    is_native_arch,
 )
 
 from xtc.utils.ext_tools import (
@@ -107,7 +109,13 @@ class MlirCTarget(MlirTarget):
 
         cc_pic = ["-fPIC"] if self._config.shared_lib or self._config.ar_lib else []
         cc_crt_inc = [f"-I{self._config.mlir_install_dir}/runtime/include"]
-        cc_arch = [f"-march={self._config.cpu}", f"-mtune={self._config.cpu}"]
+        if is_native_arch(self._config.arch):
+            cc_arch = [f"-march={self._config.cpu}", f"-mtune={self._config.cpu}"]
+        else:
+            cc_arch = [
+                f"-march={self._config.arch}",
+                f"-mtune={self._config.cpu}",
+            ]
         # FIXME Some options may change between a GCC and a LLVM based compiler
         # This works for GCC 12 for x86
         cc_cmd = (
@@ -134,7 +142,12 @@ class MlirCTarget(MlirTarget):
         payload_objs = [obj_dump_file, *self.shared_libs]
         payload_path = [*self.shared_path]
         if self._config.ar_lib:
-            ar_cmd = ["ar", "crs", ar_dump_file, obj_dump_file]
+            ar_cmd = [
+                binutils_command("ar", arch=self._config.arch),
+                "crs",
+                ar_dump_file,
+                obj_dump_file,
+            ]
             ar_process = self.execute_command(cmd=ar_cmd)
             assert ar_process.returncode == 0
             payload_objs = [ar_dump_file]
@@ -211,10 +224,14 @@ class MlirCTarget(MlirTarget):
 
     @property
     def cmd_target_cc(self):
+        if not is_native_arch(self._config.arch):
+            return [binutils_command("gcc", arch=self._config.arch)]
         return [target_cc_bin]
 
     @property
     def cmd_cc(self):
+        if not is_native_arch(self._config.arch):
+            return [binutils_command("gcc", arch=self._config.arch)]
         return [cc_bin]
 
     @property

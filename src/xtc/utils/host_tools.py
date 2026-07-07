@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import shlex
 import platform
+import shutil
 
 
 def target_arch(arch: str = "") -> str:
@@ -58,6 +59,19 @@ def binutils_command(command: str, arch: str = "") -> str:
     """
     prefix = binutils_prefix(arch)
     return f"{prefix}{command}"
+
+
+def is_native_arch(arch: str = "") -> bool:
+    return arch in ("native", "")
+
+
+def cross_cxx(arch: str) -> str:
+    if is_native_arch(arch):
+        return "c++"
+    gxx = binutils_command("g++", arch=arch)
+    if shutil.which(gxx) is not None:
+        return gxx
+    return binutils_command("gcc", arch=arch)
 
 
 def disassemble(

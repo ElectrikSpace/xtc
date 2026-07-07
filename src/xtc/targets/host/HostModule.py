@@ -62,6 +62,8 @@ class HostModule(itf.comp.Module):
         self._headers_path = headers_path
         self._csrcs = csrcs
         self._bare_ptr = kwargs.get("bare_ptr", True)
+        self._arch = kwargs.get("arch", "native")
+        self._cpu = kwargs.get("cpu", "native")
         self._graph = graph
         if self._graph is not None:
             self._np_inputs_spec = graph_np_inputs_spec(self._graph)
@@ -102,7 +104,16 @@ class HostModule(itf.comp.Module):
 
         name = kwargs.get("name")
         seed = kwargs.get("seed", 0)
-        HostCppExporter(self, Path(out_dir), name=name, seed=seed).export()
+        cxx = kwargs.get("cxx")
+        arch = kwargs.get("arch")
+        HostCppExporter(
+            self,
+            Path(out_dir),
+            name=name,
+            seed=seed,
+            cxx=cxx,
+            arch=arch,
+        ).export()
 
     @override
     def get_evaluator(self, **kwargs: Any) -> itf.exec.Evaluator:
@@ -147,3 +158,11 @@ class HostModule(itf.comp.Module):
     @property
     def headers_path(self) -> list[str]:
         return self._headers_path
+
+    @property
+    def arch(self) -> str:
+        return self._arch
+
+    @property
+    def cpu(self) -> str:
+        return self._cpu

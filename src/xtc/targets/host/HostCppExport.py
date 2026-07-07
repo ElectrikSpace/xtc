@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import numpy as np
 
 from xtc.utils.ext_tools import get_shlib_extension
+from xtc.utils.host_tools import cross_cxx, is_native_arch
 from xtc.utils.numpy import np_init
 
 if TYPE_CHECKING:
@@ -60,11 +61,15 @@ class HostCppExporter:
         *,
         name: str | None = None,
         seed: int = 0,
+        cxx: str | None = None,
+        arch: str | None = None,
     ) -> None:
         self._module = module
         self._out_dir = out_dir
         self._export_name = name or module.name
         self._seed = seed
+        self._cxx = cxx
+        self._export_arch = arch
 
     def export(self) -> None:
         inputs_spec_fn = self._module._np_inputs_spec
@@ -328,9 +333,23 @@ int main() {{
             )
         return f"    std::vector<{c_type}> {arg.c_name} = {init};"
 
+    def _target_arch(self) -> str:
+        return self._export_arch or self._module.arch
+
+    def _makefile_cxx(self) -> str:
+        if self._cxx is not None:
+            return self._cxx
+        return cross_cxx(self._target_arch())
+
+    def _arlib_link_libs(self) -> str:
+        if not is_native_arch(self._target_arch()):
+            return "-lomp"
+        return " ".join(self._module.shlibs)
+
     def _write_makefile(self) -> None:
+        cxx = self._makefile_cxx()
         if self._module.file_type == "arlib":
-            link_libs = " ".join(self._module.shlibs)
+            link_libs = self._arlib_link_libs()
             ldflags = (
                 "-Wl,--whole-archive lib/lib$(NAME).a "
                 f"-Wl,--no-whole-archive {link_libs}"
@@ -362,7 +381,7 @@ run-static: test-static
             clean_extra = ""
         content = f"""\
 NAME      := {self._export_name}
-CXX       ?= c++
+CXX       ?= {cxx}
 CXXFLAGS  ?= -O2 -std=c++17 -Wall -Wextra
 INCLUDES  := -Iinclude
 LDFLAGS   := {ldflags}

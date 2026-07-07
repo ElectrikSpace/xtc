@@ -28,6 +28,7 @@ from xtc.backends.mlir.MlirTarget import (
     get_default_target,
 )
 from xtc.utils.ext_tools import get_shlib_extension
+from xtc.utils.host_tools import is_native_arch
 from xtc.itf.runtime.common import CommonRuntimeInterface
 
 
@@ -95,12 +96,19 @@ class MlirCompiler(itf.comp.Compiler):
                     "np_outputs_spec": self._backend.np_outputs_spec,
                 }
             )
+        module_target_kwargs = {
+            "arch": self._config.arch,
+            "cpu": self._config.cpu,
+        }
         if self._config.ar_lib:
             file_name = f"{compiler.dump_file}.a"
             file_type = "arlib"
-            module_kwargs = {
-                "shlibs": getattr(self._target, "shared_libs", []),
-            }
+            if is_native_arch(self._config.arch):
+                module_kwargs = {
+                    "shlibs": getattr(self._target, "shared_libs", []),
+                }
+            else:
+                module_kwargs = {"shlibs": []}
         elif self._config.shared_lib:
             file_name = f"{compiler.dump_file}.{get_shlib_extension()}"
             file_type = "shlib"
@@ -115,6 +123,7 @@ class MlirCompiler(itf.comp.Compiler):
             bare_ptr=self._config.bare_ptr,
             graph=self._backend._graph,
             **io_specs_args,
+            **module_target_kwargs,
             **module_kwargs,
         )
         if temp_dir is not None:

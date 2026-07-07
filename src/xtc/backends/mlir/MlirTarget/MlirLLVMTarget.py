@@ -12,6 +12,10 @@ import shutil
 from pathlib import Path
 
 from xtc.utils.host_tools import disassemble
+from xtc.utils.host_tools import (
+    binutils_command,
+    is_native_arch,
+)
 
 from xtc.utils.ext_tools import (
     get_shlib_extension,
@@ -132,7 +136,12 @@ class MlirLLVMTarget(MlirTarget):
         payload_objs = [obj_dump_file, *self.shared_libs]
         payload_path = [*self.shared_path]
         if self._config.ar_lib:
-            ar_cmd = ["ar", "crs", ar_dump_file, obj_dump_file]
+            ar_cmd = [
+                binutils_command("ar", arch=self._config.arch),
+                "crs",
+                ar_dump_file,
+                obj_dump_file,
+            ]
             ar_process = self.execute_command(cmd=ar_cmd)
             assert ar_process.returncode == 0
             payload_objs = [ar_dump_file]
@@ -210,6 +219,8 @@ class MlirLLVMTarget(MlirTarget):
 
     @property
     def cmd_cc(self):
+        if not is_native_arch(self._config.arch):
+            return [binutils_command("gcc", arch=self._config.arch)]
         return [cc_bin]
 
     @property

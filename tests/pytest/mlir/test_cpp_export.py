@@ -4,6 +4,7 @@
 #
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -60,3 +61,44 @@ def test_cpp_export_matmul(tmp_path: Path) -> None:
     )
     assert run.returncode == 0, f"test binary failed:\n{run.stdout}\n{run.stderr}"
     assert "All checks passed." in run.stdout
+
+
+@requires_mlir
+@pytest.mark.skipif(sys.platform != "linux", reason="cpp export integration test (linux)")
+@pytest.mark.skipif(
+    shutil.which("aarch64-linux-gnu-g++") is None
+    and shutil.which("aarch64-linux-gnu-gcc") is None,
+    reason="aarch64 cross compiler not installed",
+)
+def test_cpp_export_matmul_cross_aarch64(tmp_path: Path) -> None:
+    impl = matmul_impl(I, J, K, DTYPE, "matmul_export_aarch64")
+    sch = impl.get_scheduler()
+    sch.set_dims(["i", "j", "k"])
+    sched = sch.schedule()
+
+    comp = impl.get_compiler(
+        ar_lib=True,
+        arch="aarch64",
+        cpu="generic",
+        dump_file=str(tmp_path / "matmul_export_aarch64"),
+    )
+    module = comp.compile(sched)
+
+    export_dir = tmp_path / "export_aarch64"
+    module.export(export_dir)
+
+    export_name = "matmul_export_aarch64"
+    ar_path = export_dir / "lib" / f"lib{export_name}.a"
+    assert ar_path.is_file()
+
+    makefile = (export_dir / "Makefile").read_text(encoding="utf-8")
+    assert "aarch64-linux-gnu-g++" in makefile
+
+    file_out = subprocess.run(
+        ["file", str(ar_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert file_out.returncode == 0, file_out.stderr
+    assert "aarch64" in file_out.stdout.lower() or "arm" in file_out.stdout.lower()
