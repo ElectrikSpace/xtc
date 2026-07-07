@@ -85,6 +85,7 @@ class MlirCTarget(MlirTarget):
         obj_dump_file = f"{dump_tmp_file}.o"
         exe_c_file = f"{dump_tmp_file}.main.c"
         so_dump_file = f"{dump_file}.{get_shlib_extension()}"
+        ar_dump_file = f"{dump_file}.a"
         exe_dump_file = f"{dump_file}.out"
         src_ir_dump_file = f"{dump_base}.mlir"
         mlir_btrn_dump_file = f"{dump_base}.before_trn.mlir"
@@ -104,7 +105,7 @@ class MlirCTarget(MlirTarget):
         )
         assert codegen_c_process.returncode == 0
 
-        cc_pic = ["-fPIC"] if self._config.shared_lib else []
+        cc_pic = ["-fPIC"] if self._config.shared_lib or self._config.ar_lib else []
         cc_crt_inc = [f"-I{self._config.mlir_install_dir}/runtime/include"]
         cc_arch = [f"-march={self._config.cpu}", f"-mtune={self._config.cpu}"]
         # FIXME Some options may change between a GCC and a LLVM based compiler
@@ -132,7 +133,13 @@ class MlirCTarget(MlirTarget):
 
         payload_objs = [obj_dump_file, *self.shared_libs]
         payload_path = [*self.shared_path]
-        if self._config.shared_lib:
+        if self._config.ar_lib:
+            ar_cmd = ["ar", "crs", ar_dump_file, obj_dump_file]
+            ar_process = self.execute_command(cmd=ar_cmd)
+            assert ar_process.returncode == 0
+            payload_objs = [ar_dump_file]
+            payload_path = []
+        elif self._config.shared_lib:
             shared_cmd = [
                 *self.cmd_cc,
                 *shared_lib_opts,

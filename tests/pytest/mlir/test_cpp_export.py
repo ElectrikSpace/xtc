@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from mlir_utils import matmul_impl, requires_mlir
-from xtc.utils.ext_tools import get_shlib_extension
 
 I, J, K, DTYPE = 4, 16, 8, "float32"
 
@@ -24,18 +23,21 @@ def test_cpp_export_matmul(tmp_path: Path) -> None:
     sch.set_dims(["i", "j", "k"])
     sched = sch.schedule()
 
-    comp = impl.get_compiler(shared_lib=True, dump_file=str(tmp_path / "matmul_export"))
+    comp = impl.get_compiler(ar_lib=True, dump_file=str(tmp_path / "matmul_export"))
     module = comp.compile(sched)
 
     export_dir = tmp_path / "export"
     module.export(export_dir)
 
-    ext = get_shlib_extension()
     export_name = "matmul_export"
     assert (export_dir / "include" / f"{export_name}.h").is_file()
-    assert (export_dir / "lib" / f"lib{export_name}.{ext}").is_file()
+    assert (export_dir / "lib" / f"lib{export_name}.a").is_file()
     assert (export_dir / "test.cpp").is_file()
     assert (export_dir / "Makefile").is_file()
+    makefile = (export_dir / "Makefile").read_text(encoding="utf-8")
+    assert "test-static:" in makefile
+    assert "STATIC_LDFLAGS" in makefile
+    assert "-pthread -static" in makefile
     assert (export_dir / "README.md").is_file()
     assert list((export_dir / "data" / "inputs").glob("*.bin"))
     assert list((export_dir / "data" / "outputs").glob("*.bin"))

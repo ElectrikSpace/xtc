@@ -94,9 +94,9 @@ class HostModule(itf.comp.Module):
 
     @override
     def export(self, out_dir: str | Path, **kwargs: Any) -> None:
-        if self._file_type != "shlib":
+        if self._file_type not in ("shlib", "arlib"):
             raise NotImplementedError(
-                f"export only supports shlib modules (got {self._file_type})"
+                f"export only supports shlib/arlib modules (got {self._file_type})"
             )
         from .HostCppExport import HostCppExporter
 

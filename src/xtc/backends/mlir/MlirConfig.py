@@ -12,6 +12,7 @@ from xtc.utils.tools import (
 @dataclass(frozen=True)
 class MlirConfig:
     shared_lib: bool = False
+    ar_lib: bool = False
     executable: bool = False
     mlir_install_dir: str | None = None
     llvm_install_dir: str | None = None

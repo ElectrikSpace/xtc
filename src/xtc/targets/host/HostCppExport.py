@@ -51,7 +51,7 @@ def _macro_prefix(c_name: str) -> str:
 
 
 class HostCppExporter:
-    """Export a CPU shared-library module for linking from external C/C++ code."""
+    """Export a CPU module for linking from external C/C++ code."""
 
     def __init__(
         self,
@@ -96,7 +96,7 @@ class HostCppExporter:
         (self._out_dir / "data" / "inputs").mkdir(parents=True, exist_ok=True)
         (self._out_dir / "data" / "outputs").mkdir(parents=True, exist_ok=True)
 
-        self._copy_shared_lib()
+        self._copy_library()
         self._write_golden_data(input_args, output_args, reference_impl)
         self._write_header(input_args, output_args)
         self._write_test_cpp(input_args, output_args)
@@ -139,9 +139,12 @@ class HostCppExporter:
             is_input=is_input,
         )
 
-    def _copy_shared_lib(self) -> None:
-        ext = get_shlib_extension()
-        dest = self._out_dir / "lib" / f"lib{self._export_name}.{ext}"
+    def _copy_library(self) -> None:
+        if self._module.file_type == "arlib":
+            dest = self._out_dir / "lib" / f"lib{self._export_name}.a"
+        else:
+            ext = get_shlib_extension()
+            dest = self._out_dir / "lib" / f"lib{self._export_name}.{ext}"
         shutil.copy2(self._module.file_name, dest)
 
     def _write_golden_data(
@@ -326,31 +329,70 @@ int main() {{
         return f"    std::vector<{c_type}> {arg.c_name} = {init};"
 
     def _write_makefile(self) -> None:
-        ext = get_shlib_extension()
-        if ext == "dylib":
-            rpath = "-Wl,-rpath,@loader_path/lib"
+        if self._module.file_type == "arlib":
+            link_libs = " ".join(self._module.shlibs)
+            ldflags = (
+                "-Wl,--whole-archive lib/lib$(NAME).a "
+                f"-Wl,--no-whole-archive {link_libs}"
+            ).rstrip()
+            static_ldflags = (
+                "-pthread -static -Wl,--whole-archive lib/lib$(NAME).a "
+                "-Wl,--no-whole-archive"
+            )
+            static_targets = """\
+test-static: test.cpp
+\t$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@ $(STATIC_LDFLAGS)
+
+.PHONY: run-static
+run-static: test-static
+\t./test-static
+
+"""
+            static_vars = f"STATIC_LDFLAGS := {static_ldflags}\n"
+            clean_extra = " test-static"
         else:
-            rpath = "-Wl,-rpath,'$$ORIGIN/lib'"
+            ext = get_shlib_extension()
+            if ext == "dylib":
+                rpath = "-Wl,-rpath,@loader_path/lib"
+            else:
+                rpath = "-Wl,-rpath,'$$ORIGIN/lib'"
+            ldflags = f"-Llib -l$(NAME) {rpath}"
+            static_targets = ""
+            static_vars = ""
+            clean_extra = ""
         content = f"""\
 NAME      := {self._export_name}
 CXX       ?= c++
 CXXFLAGS  ?= -O2 -std=c++17 -Wall -Wextra
 INCLUDES  := -Iinclude
-LDFLAGS   := -Llib -l$(NAME) {rpath}
-
+LDFLAGS   := {ldflags}
+{static_vars}
 test: test.cpp
 \t$(CXX) $(CXXFLAGS) $(INCLUDES) $< -o $@ $(LDFLAGS)
 
-.PHONY: run clean
+{static_targets}.PHONY: run clean
 run: test
 \t./test
 
 clean:
-\trm -f test
+\trm -f test{clean_extra}
 """
         (self._out_dir / "Makefile").write_text(content, encoding="utf-8")
 
     def _write_readme(self) -> None:
+        if self._module.file_type == "arlib":
+            lib_desc = f"`lib/lib{self._export_name}.a` — compiled static library"
+            static_build = (
+                "\n\nOptionally build a fully static test binary (may fail if "
+                "runtime symbols are missing):\n\n"
+                "```bash\nmake test-static\nmake run-static\n```\n"
+            )
+        else:
+            lib_desc = (
+                f"`lib/lib{self._export_name}.{get_shlib_extension()}`"
+                " — compiled shared library"
+            )
+            static_build = ""
         content = f"""\
 # XTC exported kernel: {self._export_name}
 
@@ -361,10 +403,10 @@ Artifacts produced by `module.export()` for CPU linking from C/C++.
 ```bash
 make
 make run
-```
+```{static_build}
 
 - `include/{self._export_name}.h` — kernel declaration and tensor metadata macros
-- `lib/lib{self._export_name}.{get_shlib_extension()}` — compiled shared library
+- {lib_desc}
 - `data/inputs/*.bin` / `data/outputs/*.bin` — golden inputs and reference outputs
 - `test.cpp` — loads golden data, calls the kernel, compares against reference
 """

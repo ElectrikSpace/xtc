@@ -43,6 +43,9 @@ class MlirCompiler(itf.comp.Compiler):
         kwargs["bare_ptr"] = True  # Not supported for now
         kwargs["to_disassemble"] = kwargs.get("to_disassemble", backend.payload_name)
         self._config = MlirConfig(**kwargs)
+        assert not (self._config.shared_lib and self._config.ar_lib), (
+            "cannot have both shared_lib and ar_lib"
+        )
         if target is None:
             self._target = get_default_target()(self._config)
         elif isinstance(target, str):
@@ -67,8 +70,6 @@ class MlirCompiler(itf.comp.Compiler):
         self,
         schedule: itf.schd.Schedule,
     ) -> itf.comp.Module:
-        shared_lib = self._config.shared_lib
-        executable = self._config.executable
         temp_dir = None
         if self.dump_file is None:
             temp_dir = tempfile.mkdtemp()
@@ -94,14 +95,27 @@ class MlirCompiler(itf.comp.Compiler):
                     "np_outputs_spec": self._backend.np_outputs_spec,
                 }
             )
+        if self._config.ar_lib:
+            file_name = f"{compiler.dump_file}.a"
+            file_type = "arlib"
+            module_kwargs = {
+                "shlibs": getattr(self._target, "shared_libs", []),
+            }
+        elif self._config.shared_lib:
+            file_name = f"{compiler.dump_file}.{get_shlib_extension()}"
+            file_type = "shlib"
+            module_kwargs = {}
+        else:
+            raise ValueError("MlirCompiler requires shared_lib=True or ar_lib=True")
         module = self._target.create_module(
             Path(compiler.dump_file).name,
             self._backend.payload_name,
-            f"{compiler.dump_file}.{get_shlib_extension()}",
-            "shlib",
+            file_name,
+            file_type,
             bare_ptr=self._config.bare_ptr,
             graph=self._backend._graph,
             **io_specs_args,
+            **module_kwargs,
         )
         if temp_dir is not None:
             shutil.rmtree(temp_dir)

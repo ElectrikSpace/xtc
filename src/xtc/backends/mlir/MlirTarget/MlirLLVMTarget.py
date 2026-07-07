@@ -86,6 +86,7 @@ class MlirLLVMTarget(MlirTarget):
         obj_dump_file = f"{dump_tmp_file}.o"
         exe_c_file = f"{dump_tmp_file}.main.c"
         so_dump_file = f"{dump_file}.{get_shlib_extension()}"
+        ar_dump_file = f"{dump_file}.a"
         exe_dump_file = f"{dump_file}.out"
         src_ir_dump_file = f"{dump_base}.mlir"
         mlir_btrn_dump_file = f"{dump_base}.before_trn.mlir"
@@ -105,7 +106,11 @@ class MlirLLVMTarget(MlirTarget):
         )
         assert llvmir_process.returncode == 0
 
-        opt_pic = ["--relocation-model=pic"] if self._config.shared_lib else []
+        opt_pic = (
+            ["--relocation-model=pic"]
+            if self._config.shared_lib or self._config.ar_lib
+            else []
+        )
         opt_cmd = self.cmd_opt + opt_pic + [ir_dump_file, "-o", bc_dump_file]
         opt_process = self.execute_command(cmd=opt_cmd)
         assert opt_process.returncode == 0
@@ -126,7 +131,13 @@ class MlirLLVMTarget(MlirTarget):
 
         payload_objs = [obj_dump_file, *self.shared_libs]
         payload_path = [*self.shared_path]
-        if self._config.shared_lib:
+        if self._config.ar_lib:
+            ar_cmd = ["ar", "crs", ar_dump_file, obj_dump_file]
+            ar_process = self.execute_command(cmd=ar_cmd)
+            assert ar_process.returncode == 0
+            payload_objs = [ar_dump_file]
+            payload_path = []
+        elif self._config.shared_lib:
             shared_cmd = [
                 *self.cmd_cc,
                 *shared_lib_opts,
