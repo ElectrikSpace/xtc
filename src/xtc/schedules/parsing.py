@@ -71,9 +71,9 @@ class Annotations:
     vectorize: bool | str = False
     parallelize: bool | str = False
     buffer: str | None = None
-    buffer_specified: bool = False
+    buffer_specified: bool | str = False
     pack: tuple[literal, str | None, bool | str] | None = None
-    pack_specified: bool = False
+    pack_specified: bool | str = False
     fuse_producer: int | None = None
     fuse_consumer: bool | None = False
     partial: bool = False
@@ -216,7 +216,7 @@ class ScheduleParser:
         return AxisDecl(axis=declaration, annotations=annotations)
 
     def _parse_annotations(
-        self, value: list[tuple[str, Any]], context: str
+        self, value: list[tuple[str, Any]], declaration: str
     ) -> Annotations:
         """Parse annotation dict into Annotations object."""
 
@@ -225,9 +225,9 @@ class ScheduleParser:
         vectorize: bool | str = False
         parallelize: bool | str = False
         buffer: str | None = None
-        buffer_specified = False
+        buffer_specified: bool | str = False
         pack: tuple[literal, str | None, bool | str] | None = None
-        pack_specified = False
+        pack_specified: bool | str = False
         fuse_producer: int | None = None
         fuse_consumer: bool = False
         partial = False
@@ -272,8 +272,12 @@ class ScheduleParser:
                     buffer = None if param == "default" else param
                     buffer_specified = True
                 case "pack":
-                    pack = self._parse_pack_param(param, context)
-                    pack_specified = True
+                    if isinstance(param, str):
+                        pack = (declaration, None, False)
+                        pack_specified = param
+                    else:
+                        pack = self._parse_pack_param(param, declaration)
+                        pack_specified = True
                 case "fuse_producer":
                     if param is None:
                         fuse_producer = None
@@ -290,15 +294,26 @@ class ScheduleParser:
                             f'`{{"fuse_consumer" = {param}}}`: fuse_consumer parameter should be a bool.'
                         )
                     fuse_consumer = param
+                case "pad":
+                    if pack is None:
+                        raise ScheduleParseError(
+                            f"pad annotation before/without pack on {declaration}: {key}"
+                        )
+                    declaration_, mtype_, pad_ = pack
+                    pack = (declaration_, mtype_, param)
                 case "partial":
                     partial = True
                 case "full":
                     full = True
                 case _:
-                    raise ScheduleParseError(f"Unknown annotation on {context}: {key}")
+                    raise ScheduleParseError(
+                        f"Unknown annotation on {declaration}: {key}"
+                    )
 
         if partial and full:
-            raise ScheduleParseError(f"{context} has both annotations full and partial")
+            raise ScheduleParseError(
+                f"{declaration} has both annotations full and partial"
+            )
 
         return Annotations(
             unroll_factor=unroll_factor,
@@ -316,33 +331,33 @@ class ScheduleParser:
         )
 
     def _parse_pack_param(
-        self, param: Any, context: str
+        self, param: Any, declaration: str
     ) -> tuple[literal, str | None, bool | str] | None:
         """Parse pack parameter into (input_idx, mtype, pad) tuple."""
 
         if param is None:
-            return (context, None, False)
+            return (declaration, None, False)
 
         if not isinstance(param, (list, tuple)) or len(param) != 3:
             raise ScheduleParseError(
-                f'`{{"pack" = {param}}}` on {context}: pack parameter should be a tuple (input_idx, mtype, pad).'
+                f'`{{"pack" = {param}}}` on {declaration}: pack parameter should be a tuple (input_idx, mtype, pad).'
             )
 
         input_idx, mtype, pad = param
 
         if not isinstance(input_idx, literal):
             raise ScheduleParseError(
-                f'`{{"pack" = {param}}}` on {context}: input_idx should be an integer.'
+                f'`{{"pack" = {param}}}` on {declaration}: input_idx should be an integer.'
             )
 
         if not isinstance(mtype, str | None):
             raise ScheduleParseError(
-                f'`{{"pack" = {param}}}` on {context}: mtype should be a string or None.'
+                f'`{{"pack" = {param}}}` on {declaration}: mtype should be a string or None.'
             )
 
         if not isinstance(pad, bool | str):
             raise ScheduleParseError(
-                f'`{{"pack" = {param}}}` on {context}: pad should be a boolean.'
+                f'`{{"pack" = {param}}}` on {declaration}: pad should be a boolean.'
             )
 
         # Convert "default" to None for mtype
