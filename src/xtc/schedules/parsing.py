@@ -76,6 +76,7 @@ class Annotations:
     pack_specified: bool | str = False
     fuse_producer: int | None = None
     fuse_consumer: bool | None = False
+    interchange: str = ""
     partial: bool = False
     full: bool = False
 
@@ -230,6 +231,7 @@ class ScheduleParser:
         pack_specified: bool | str = False
         fuse_producer: int | None = None
         fuse_consumer: bool = False
+        interchange: str = ""
         partial = False
         full = False
 
@@ -301,6 +303,11 @@ class ScheduleParser:
                         )
                     declaration_, mtype_, pad_ = pack
                     pack = (declaration_, mtype_, param)
+                case "interchange":
+                    if param is None:
+                        interchange = "interchange"
+                    else:
+                        interchange = param
                 case "partial":
                     partial = True
                 case "full":
@@ -326,6 +333,7 @@ class ScheduleParser:
             pack_specified=pack_specified,
             fuse_producer=fuse_producer,
             fuse_consumer=fuse_consumer,
+            interchange=interchange,
             partial=partial,
             full=full,
         )
