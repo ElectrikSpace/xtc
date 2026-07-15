@@ -77,6 +77,7 @@ class Annotations:
     fuse_producer: int | None = None
     fuse_consumer: bool | None = False
     interchange: str = ""
+    level: str = ""
     partial: bool = False
     full: bool = False
 
@@ -232,6 +233,7 @@ class ScheduleParser:
         fuse_producer: int | None = None
         fuse_consumer: bool = False
         interchange: str = ""
+        level: str = ""
         partial = False
         full = False
 
@@ -308,6 +310,12 @@ class ScheduleParser:
                         interchange = "interchange"
                     else:
                         interchange = param
+                case "level":
+                    if param is None:
+                        raise ScheduleParseError(
+                            f"Level annotation without name on {declaration}: {key}"
+                        )
+                    level = param
                 case "partial":
                     partial = True
                 case "full":
@@ -334,6 +342,7 @@ class ScheduleParser:
             fuse_producer=fuse_producer,
             fuse_consumer=fuse_consumer,
             interchange=interchange,
+            level=level,
             partial=partial,
             full=full,
         )

@@ -37,16 +37,16 @@ spec = f"""
         - nr == {vector_size} * nvr
         - nvr * mr >= {ilp}
         - nvr * mr * kr <= {reorder_buffer}
-        - kc * nr <= {nb_words_L1}
-        - kc * mc <= {nb_words_L2}
-        - kc * nc <= {nb_words_L3}
+        - footprint(B, L1) <= {nb_words_L1}
+        - footprint(A, L2) <= {nb_words_L2}
+        - footprint(B, L3) <= {nb_words_L3}
     j:
     k:
     B: pack=pack_B pad
-    i:
+    i: level=L3
     A: pack pad=pad_A
-    j#nc:
-    i#mc:
+    j#nc: level=L2
+    i#mc: level=L1
     k#kc: unroll=kr
     i#mr: unroll full
     j#nr: vectorize full
