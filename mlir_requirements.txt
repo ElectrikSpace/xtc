@@ -1,4 +1,4 @@
 xtc-llvm-tools==22.1.8.1
 xtc-mlir-tools==22.1.8.2
 xtc-mlir-python-bindings==22.1.8.2
-xtc-mlir-extra-tools==22.1.8.1
+xtc-mlir-extra-tools==22.1.8.6

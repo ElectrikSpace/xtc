@@ -33,7 +33,7 @@ from mlir.ir import (
 )
 from mlir.passmanager import PassManager
 from mlir.ir import Module
-import subprocess
+import mlir.xtc_transform
 
 # Import SDist if available
 try:
@@ -750,47 +750,18 @@ class MlirProgramApplyPasses:
         pm.run(self._mlir_program.mlir_module.operation)
 
 
-class MlirProgramApplyXTCOpt:
-    # xtc-opt is a version of mlir-opt with extra passes added to it
-
-    def __init__(self, mlir_program: RawMlirProgram, mlir_install_dir: str) -> None:
-        self._mlir_program = mlir_program
-        self._mlir_install_dir = mlir_install_dir
-
-    def run(self, pass_names: list[str]) -> None:
-        # serialize current module to text
-        mlir_text = str(self._mlir_program.mlir_module)
-        pipeline = "builtin.module(" + ",".join(pass_names) + ")"
-        xtc_opt_location = f"{self._mlir_install_dir}/bin/xtc-opt"
-
-        result = subprocess.run(
-            [xtc_opt_location, f"--pass-pipeline={pipeline}", "-"],
-            input=mlir_text,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"xtc-opt failed:\n{result.stderr}")
-
-        # parse the result back into the existing context
-        self._mlir_program.module = Module.parse(
-            result.stdout, self._mlir_program.mlir_context
-        )
-
-
 def apply_bufferization_passes(mlir_program: RawMlirProgram, mlir_install_dir: str):
-    # folds extract slices to make smaller tensor.empty allocations
-    MlirProgramApplyXTCOpt(mlir_program, mlir_install_dir).run(
-        ["func.func(reduce-extract-slices)"]
-    )
+    assert mlir.xtc_transform
     bufferize_options = [
         "bufferize-function-boundaries",
         "function-boundary-type-conversion=identity-layout-map",
         "buffer-alignment=256",
     ]
-    # run the remaining passes with passmanager for newer llvm version
+
     MlirProgramApplyPasses(mlir_program).run(
         [
+            # xtc pass that folds extract slices to make smaller tensor.empty allocations
+            "func.func(reduce-extract-slices)",
             "canonicalize",
             "cse",
             "eliminate-empty-tensors",  # causes ops to write directly to out buffer
