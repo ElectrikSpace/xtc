@@ -200,21 +200,29 @@ class XTCOperMatmul(XTCOperator):
         assert k == bk, (
             f"incompatible dimension k for matmul inputs shapes: ({i}, {k}) ({bk}, {j})"
         )
+        out_dtype = getattr(self.attrs, "dtype", None)
+        if out_dtype is None:
+            out_dtype = inputs_types[0].dtype
         return [
-            XTCTensorType(
-                shape=(i, j), dtype=inputs_types[0].dtype, device=self.device
-            ),
+            XTCTensorType(shape=(i, j), dtype=out_dtype, device=self.device),
         ]
 
     @override
     def forward(self, inputs: Sequence[Tensor]) -> Sequence[XTCTensor]:
-        A = inputs[0].numpy()
-        B = inputs[1].numpy()
-        A = A.reshape((A.shape[0], -1))
-        B = B.reshape((-1, B.shape[-1]))
-        # Note, use np.dot instead of np.matmul which may be buggy on Mac accelerators
-        matmul = XTCTensor(np.dot(A, B))
         expected_type = self.forward_types([inp.type for inp in inputs])[0]
+        np_acc = np.dtype(expected_type.constant_dtype)
+        a = inputs[0].numpy().astype(np_acc)
+        b = inputs[1].numpy().astype(np_acc)
+        a = a.reshape((a.shape[0], -1))
+        b = b.reshape((-1, b.shape[-1]))
+        # Note, use np.dot instead of np.matmul which may be buggy on Mac accelerators
+        out = np.dot(a, b).astype(np_acc)
+        matmul = XTCTensor(out)
+        matmul._type = XTCTensorType(
+            shape=out.shape,
+            dtype=expected_type.constant_dtype,
+            device=expected_type.device,
+        )
         assert matmul.type == expected_type, (
             f"output type mismatch expect: {matmul.type} != {expected_type}"
         )

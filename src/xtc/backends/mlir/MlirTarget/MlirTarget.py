@@ -3,6 +3,7 @@
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Any
 
 from ..MlirConfig import MlirConfig
@@ -81,3 +82,27 @@ class MlirTarget(ABC):
         Apply the custom vectorization for the target.
         """
         ...
+
+    def pack_at_padding_heuristic(
+        self,
+        *,
+        schedule_dims: Sequence[str],
+        input_idx: int,
+        input_element_bytewidth: int,
+        input_buffer_shape: Sequence[int],
+    ) -> dict[str, int]:
+        """Suggested per-dimension slack when ``pack_at(..., pad=True)``.
+
+        Dimensions are abstract nest names (e.g. ``i``, ``j``, ``k`` for matmul).
+        Returning only zeros disables heuristic padding for every target by default;
+        specific targets (e.g. MPPA) may override with a TVM-style stride slack hint.
+
+        Args:
+            schedule_dims: Ordered dimension names for the scheduled operation.
+            input_idx: Packed operand index.
+            input_element_bytewidth: Element size in bytes for that operand.
+            input_buffer_shape: Operand shape **after ancestor tiling** at the ``pack_at``
+                loop (memref rank order), computed by the MLIR compiler from the schedule.
+        """
+        del schedule_dims, input_idx, input_element_bytewidth, input_buffer_shape
+        return {}

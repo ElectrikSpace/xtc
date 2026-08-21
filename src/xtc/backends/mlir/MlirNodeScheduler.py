@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+from typing import Literal
+
 from typing_extensions import override
 from dataclasses import dataclass, asdict
 
@@ -12,7 +14,18 @@ from xtc.schedules.plain_schedule import PlainNodeSchedule, PlainNodeScheduler
 __all__ = [
     "MlirNodeScheduler",
     "MlirNodeSchedule",
+    "PackedBufferEntry",
 ]
+
+ROOT_SEP = "/"
+
+# Bare index: no padding request. ``(input_idx, True)``: padding slack is derived at
+# compile time via :meth:`MlirTarget.pack_at_padding_heuristic`.
+PackedBufferEntry = int | tuple[int, Literal[True]]
+
+
+def basename(loop_name: str) -> str:
+    return loop_name.split(ROOT_SEP)[-1]
 
 
 @dataclass(frozen=True)
@@ -31,6 +44,7 @@ class MlirNodeScheduler:
             node_name,
             node_ident,
             dims,
+        )
 
     @property
     def node_name(self) -> str:
