@@ -153,8 +153,6 @@ class MlirScheduler(itf.schd.Scheduler):
         # The current implementation exclusively rely on SDist, but upstream
         # transform dialect may be used for some cases.
         assert mtype is None or mtype == "global" or mtype == "local"
-        if pad:
-            return  # TODO: not implemented for now
         if mtype is None or mtype == "global":
             self._require_extension("sdist", weak=True)
         else:

@@ -4,6 +4,7 @@
 #
 from typing_extensions import override
 from typing import Any
+from collections.abc import Sequence
 import subprocess
 import os
 import sys
@@ -81,8 +82,9 @@ class MlirMppaTarget(MlirTarget):
         mlir_amppa_dump_file = f"{dump_tmp_file}.after_mppa.mlir"
         c_host_dump_file = f"{dump_tmp_file}.host.c"
         c_accelerator_dump_file = f"{dump_tmp_file}.accelerator.c"
-        obj_host_dump_file = f"{dump_tmp_file}.host.o"
-        obj_accelerator_dump_file = f"{dump_tmp_file}.accelerator.o"
+        obj_host_dump_file = f"{dump_base}.host.o"
+        obj_accelerator_dump_file = f"{dump_base}.accelerator.o"
+        obj_traces_dump_file = f"{dump_base}.traces.o"
         so_dump_file = f"{dump_file}.{get_shlib_extension()}"
         kvx_so_dump_file = f"{dump_file}.kvx.so"
 
@@ -128,12 +130,14 @@ class MlirMppaTarget(MlirTarget):
             c_host_dump_file=c_host_dump_file,
             obj_host_dump_file=obj_host_dump_file,
             kvx_so_dump_file=kvx_so_dump_file,
+            obj_traces_dump_file=obj_traces_dump_file,
         )
 
         # Link final shared library
         self._mlir_mppa_backend.link_shared_library(
             obj_host_dump_file=obj_host_dump_file,
             obj_accelerator_dump_file=obj_accelerator_dump_file,
+            obj_traces_dump_file=obj_traces_dump_file,
             so_dump_file=so_dump_file,
         )
 
@@ -145,6 +149,7 @@ class MlirMppaTarget(MlirTarget):
             os.remove(c_accelerator_dump_file)
             os.remove(obj_host_dump_file)
             os.remove(obj_accelerator_dump_file)
+            os.remove(obj_traces_dump_file)
 
     @override
     def create_module(
@@ -168,6 +173,31 @@ class MlirMppaTarget(MlirTarget):
     @override
     def apply_custom_vectorize(self, handle: OpResult) -> None:
         transform.AnnotateOp(handle, "xtc.request_vectorization")
+
+    @override
+    def pack_at_padding_heuristic(
+        self,
+        *,
+        schedule_dims: Sequence[str],
+        input_idx: int,
+        input_element_bytewidth: int,
+        input_buffer_shape: Sequence[int],
+    ) -> dict[str, int]:
+        del input_idx
+        print(f"Input buffer shape: {input_buffer_shape}")
+        inner_extent = (
+            int(input_buffer_shape[-1]) if len(input_buffer_shape) >= 1 else 0
+        )
+        # TVM CPU heuristic analog (`factor_offset` in TVMScheduleEmitter): sets × line fill on ``k``.
+        # ``inner_extent`` is the tiled stride-1 span from the schedule (memref axis order).
+        if len(schedule_dims) >= 3 and schedule_dims[-1] == "k":
+            num_sets, line_size = 64, 64
+            elts_per_line = max(1, line_size // max(1, input_element_bytewidth))
+            slack_line = num_sets * elts_per_line
+            if inner_extent > 0:
+                slack_line += inner_extent % max(1, elts_per_line)
+            return {"k": slack_line}
+        return {}
 
     def dump_ir(self, mlir_program: RawMlirProgram, title: str):
         print(f"// -----// {title} //----- //", file=sys.stderr)
@@ -216,9 +246,10 @@ class MlirProgramToMlirMppaPass:
         passes.append("func.func(sdist-fuse-linalg-fill-ops)")
         passes.append("sdist-group-transfers")
         passes.append("sdist-remove-intermediate-subview-ops")
-        passes.append("convert-sdist-to-mppa{reverse-reads=true}")
+        # passes.append("convert-sdist-to-sdist-com")
+        # passes.append("convert-sdist-com-to-mppa") # TODO handle reverse read
+        passes.append("convert-sdist-to-mppa{reverse-reads=false}")
         passes.append("convert-sdist-utils-to-mppa")
-
         new_passes = []
         for p in passes:
             new_passes.append(p)
@@ -263,7 +294,16 @@ class MlirMppaBackend:
 
     @property
     def cmd_kvx_cc(self):
+        return [f"{self._csw_path}/bin/kvx-cos-clang"]
+        # return [f"{self._csw_path}/bin/kvx-cos-gcc"]
+
+    @property
+    def cmd_kvx_ld(self):
         return [f"{self._csw_path}/bin/kvx-cos-gcc"]
+
+    @property
+    def cmd_kvx_trace_util(self):
+        return [f"{self._csw_path}/bin/kvx-trace-util"]
 
     @property
     def cmd_host_cc(self):
@@ -305,23 +345,24 @@ class MlirMppaBackend:
         passes.append("func.func(kalray-lift-strided-memref-copy-to-linalg)")
         passes.append("canonicalize")
         passes.append("func.func(kvxcluster-lower-promoted-memory)")
-        passes.append("func.func(affine-expand-index-ops-as-affine)")
         passes.append("canonicalize")
         passes.append(
-            "func.func(kvxcluster-optimize-dma-transfers{bundle=true pipeline=false})"
+            "func.func(kvxcluster-optimize-dma-transfers{bundle=true pipeline=false split-pipeline-outer-dma=false})"
         )
         passes.append("canonicalize")
+        passes.append("func.func(affine-expand-index-ops-as-affine)")
         passes.append("func.func(kvxcluster-basic-static-allocation)")
         passes.append("canonicalize")
         passes.append("func.func(kalray-remove-useless-initializations)")
         passes.append("canonicalize")
-        passes.append("func.func(libtensors-catch)")
+        # passes.append("func.func(libtensors-catch)")
         passes.append("canonicalize")
         passes.append("func.func(kvxpe-scf-forall-distribute{num-pes=1})")
         passes.append("func.func(kvxpe-launch)")
         passes.append("canonicalize")
         passes.append(
-            "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization})"
+            # "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=true})"
+            "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=false})"
         )
         passes.append("canonicalize")
         passes.append("convert-linalg-to-loops")
@@ -337,10 +378,14 @@ class MlirMppaBackend:
         passes.append("convert-math-to-libm")
         passes.append("func.func(lower-affine)")
         passes.append("cse")
-        # TODO Enable Mppa traces
-        # if config.mppa_trace_enable:
-        #    passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.launch})")
-        #    passes.append("kalray-apply-instrumentation{use-traces=" + str(config.mppa_trace_enable) + "}")
+        # passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.static_alloc})")
+        # passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.static_dealloc})")
+        # passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.barrier})")
+        # passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.dma_sync_noc})")
+        # passes.append("func.func(kalray-request-benchmarks{target-op=kvxcluster.dma_wait})")
+        # passes.append("func.func(kalray-request-benchmarks{target-op=kvxpe.launch})")
+        # passes.append("func.func(kalray-request-benchmarks{target-op=libtensors.f16_matmul})")
+        # passes.append("kalray-apply-instrumentation{use-traces=true}")
         passes.append("func.func(kvxcluster-outline-kernels{specialize=true})")
         passes.append("func.func(canonicalize)")
 
@@ -403,9 +448,11 @@ class MlirMppaBackend:
             f"-I{self._mlir_mppa_path}/include",
             "-march=kv3-2",
             "-DBUILD_ID=0",
-            "-fvect-cost-model=cheap",
+            # "-fvect-cost-model=cheap",
             "-fstack-limit-register=sr",
+            "-DMPPA_TRACE_ENABLE",  # FIXME put under an option
             "-c",
+            "--save-temps",
             c_accelerator_dump_file,
             "-o",
             obj_accelerator_dump_file,
@@ -422,26 +469,47 @@ class MlirMppaBackend:
         libtensors_kernels_2 = (
             self._mlir_mppa_path + "/include/libtensors/libtensor_tests_kernel_2.o"
         )  # FIXME test
-        cmd = self.cmd_kvx_cc + [
+        cmd = self.cmd_kvx_ld + [
+            "-DMPPA_TRACE_ENABLE",  # FIXME put under an option
+            "-lmppatrace",  # FIXME put under an option
             "-shared",
             "-fPIC",
             "-march=kv3-2",
             "-Wl,-soname=libkvx.so",
             obj_accelerator_dump_file,
-            libtensors_kernels,
-            libtensors_kernels_2,
+            # libtensors_kernels,
+            # libtensors_kernels_2,
             "-o",
             kvx_so_dump_file,
         ]
         exe_process = self._execute_command(cmd=cmd)
         assert exe_process.returncode == 0
+        # Enable traces
+        # cmd = self.cmd_kvx_trace_util + [
+        #    "-s1",
+        #    "-t",
+        #    "\"kmt_kernel_0/.*\"",
+        #    kvx_so_dump_file,
+        # ]
+        # exe_process = self._execute_command(cmd=cmd)
+        # assert exe_process.returncode == 0
+        os.system(
+            self.cmd_kvx_trace_util[0] + ' -s1 -t "kmt_kernel_0/.*" ' + kvx_so_dump_file
+        )
+        # os.system(self.cmd_kvx_trace_util[0] + " -d long " + kvx_so_dump_file)
 
     def compile_c_host(
-        self, c_host_dump_file: str, obj_host_dump_file: str, kvx_so_dump_file: str
+        self,
+        c_host_dump_file: str,
+        obj_host_dump_file: str,
+        kvx_so_dump_file: str,
+        obj_traces_dump_file: str,
     ) -> None:
+        # generated host c code
         cmd = self.cmd_host_cc + [
             "-O2",
             "-fPIC",
+            "-DMPPA_TRACE_ENABLE",  # FIXME put under an option
             "-Wall",
             "-Wextra",
             "-I" + self._mlir_mppa_path + "/include",
@@ -455,15 +523,38 @@ class MlirMppaBackend:
         ]
         exe_process = self._execute_command(cmd=cmd)
         assert exe_process.returncode == 0
+        # traces
+        cmd = self.cmd_host_cc + [
+            "-DMPPA_TRACE_ENABLE",  # FIXME put under an option
+            "-O2",
+            "-fPIC",
+            "-Wall",
+            "-Wextra",
+            "-I" + self._mlir_mppa_path + "/include",
+            "-I" + self._csw_path + "/include",
+            "-DTARGET_KV3_2",
+            '-DKERNEL_PATHNAME="' + kvx_so_dump_file + '"',
+            "-c",
+            self._mlir_mppa_path + "/src/runtime/traces.c",
+            "-o",
+            obj_traces_dump_file,
+        ]
+        exe_process = self._execute_command(cmd=cmd)
+        assert exe_process.returncode == 0
 
     def link_shared_library(
-        self, obj_host_dump_file: str, obj_accelerator_dump_file: str, so_dump_file: str
+        self,
+        obj_host_dump_file: str,
+        obj_accelerator_dump_file: str,
+        obj_traces_dump_file: str,
+        so_dump_file: str,
     ) -> None:
         cmd = self.cmd_host_cc + [
             "-shared",
             "-fPIC",
             "-O2",
             obj_host_dump_file,
+            obj_traces_dump_file,
             "-o",
             so_dump_file,
             "-Wl,-rpath,$ORIGIN/../lib",

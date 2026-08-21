@@ -106,8 +106,6 @@ class MppaConfig:
             and self.platform == other.platform
             and self.arch == other.arch
             and self.firmware == other.firmware
-            and self.verbose == other.verbose
-            and self.build_verbose == other.build_verbose
             and self.benchmark == other.benchmark
             and self.mppa_trace_enable == other.mppa_trace_enable
             and self.mppa_trace_use_syscall == other.mppa_trace_use_syscall
