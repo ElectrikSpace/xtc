@@ -148,7 +148,9 @@ print(f"CODE: {res}")
 # CHECK-NEXT:          } {"./j"}
 # CHECK-NEXT:          sdist.terminator
 # CHECK-NEXT:        } {"./i"}
+# CHECK-NEXT:        memref.dealloc %alloc : memref<1x32xf32, 2>
 # CHECK-NEXT:      } {"./k"}
+# CHECK-NEXT:      memref.dealloc %0 : memref<512x32xf32, 1>
 # CHECK-NEXT:      return
 # CHECK-NEXT:    }
 # CHECK-NEXT:  }
