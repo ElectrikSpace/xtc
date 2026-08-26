@@ -9,5 +9,6 @@ from . import (
     back,  # type: ignore
     schd,  # type: ignore
     comp,  # type: ignore
+    pred,  # type: ignore
     exec,  # type: ignore
 )
