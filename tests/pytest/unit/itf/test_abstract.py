@@ -9,3 +9,5 @@ def test_abstract_imports():
     from xtc.itf.comp.compiler import Compiler
     from xtc.itf.schd.scheduler import Scheduler
     from xtc.itf.schd.schedule import Schedule
+    from xtc.itf.pred.predictor import Predictor
+    from xtc.itf.pred.model import PredictModel
