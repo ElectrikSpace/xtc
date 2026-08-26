@@ -17,9 +17,8 @@ def requires_mlir(*arg):
     return pytest.mark.skipif(not has_mlir(), reason="requires MLIR")(*arg)
 
 
-def matmul_impl(i, j, k, dtype, name):
+def matmul_graph(i, j, k, dtype, name):
     import xtc.graphs.xtc.op as O
-    from xtc.backends.mlir.MlirGraphBackend import MlirGraphBackend
 
     a = O.tensor((i, k), dtype, name="A")
     b = O.tensor((k, j), dtype, name="B")
@@ -27,4 +26,10 @@ def matmul_impl(i, j, k, dtype, name):
     with O.graph(name=name) as gb:
         O.matmul(a, b, name="C")
 
-    return MlirGraphBackend(gb.graph)
+    return gb.graph
+
+
+def matmul_impl(i, j, k, dtype, name):
+    from xtc.backends.mlir.MlirGraphBackend import MlirGraphBackend
+
+    return MlirGraphBackend(matmul_graph(i, j, k, dtype, name))
