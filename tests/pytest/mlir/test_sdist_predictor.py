@@ -82,6 +82,50 @@ def test_sdist_com_predictor_model_predict_is_random():
 
 
 @requires_mlir()
+def test_sdist_com_predictor_model_predict_handles_sequential_schedules(capsys):
+    # The MlirProgram and its MlirProgramCompiler are built once for the
+    # model and reused across `predict` calls: make sure the underlying MLIR
+    # module is correctly reset between two different schedules, so that
+    # lowering the second schedule is not affected by the first one.
+    graph = matmul_graph(4, 32, 512, "float32", "matmul")
+    predictor = SDistPredictor(graph)
+    model = predictor.get_model()
+
+    scheduler1 = predictor.get_scheduler()
+    scheduler1.tile("i", {"i1": 2})
+    scheduler1.interchange(["i", "j", "k", "i1"])
+    schedule1 = scheduler1.schedule()
+
+    scheduler2 = predictor.get_scheduler()
+    scheduler2.tile("j", {"j1": 4})
+    scheduler2.interchange(["j", "i", "k", "j1"])
+    schedule2 = scheduler2.schedule()
+
+    cost1 = model.predict(schedule1)
+    ir_after_schedule1 = capsys.readouterr().err
+
+    cost2 = model.predict(schedule2)
+    ir_after_schedule2 = capsys.readouterr().err
+
+    # Predicting again with the first schedule should reproduce the exact
+    # same IR as the first time, showing that the module was properly reset.
+    cost1_again = model.predict(schedule1)
+    ir_after_schedule1_again = capsys.readouterr().err
+
+    for cost in (cost1, cost2, cost1_again):
+        assert isinstance(cost, float)
+        assert 0.0 <= cost <= 1.0
+
+    assert '"./i1"' in ir_after_schedule1
+    assert '"./j1"' not in ir_after_schedule1
+
+    assert '"./j1"' in ir_after_schedule2
+    assert '"./i1"' not in ir_after_schedule2
+
+    assert ir_after_schedule1 == ir_after_schedule1_again
+
+
+@requires_mlir()
 def test_sdist_predictor_defaults_to_no_machine_description():
     graph = matmul_graph(4, 32, 512, "float32", "matmul")
     predictor = SDistPredictor(graph)

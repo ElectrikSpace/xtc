@@ -52,6 +52,11 @@ class SDistPredictor(itf.pred.Predictor):
         return self._backend.graph
 
     @property
+    def mlir_backend(self) -> MlirGraphBackend:
+        """Returns the underlying MlirGraphBackend created by this predictor."""
+        return self._backend
+
+    @property
     def machine_description_path(self) -> Path | None:
         """Returns the path to the YAML machine description file, if any."""
         return self._machine_description_path
