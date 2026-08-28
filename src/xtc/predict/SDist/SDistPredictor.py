@@ -44,7 +44,7 @@ class SDistPredictor(itf.pred.Predictor):
 
     @override
     def get_model(self, **kwargs: Any) -> SDistComPredictorModel:
-        return SDistComPredictorModel(self)
+        return SDistComPredictorModel(self, self._machine_description_path)
 
     @property
     @override
