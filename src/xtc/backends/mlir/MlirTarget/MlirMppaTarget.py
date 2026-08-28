@@ -338,6 +338,7 @@ class MlirMppaBackend:
         # passes.append("func.func(mppa-launch{device=k300})")
         # passes.append("func.func(kvxcluster-scf-forall-distribute{num-clusters=1})")
         # passes.append("func.func(kvxcluster-launch)")
+        passes.append("func.func(kalray-standardize-memory-spaces)")
         passes.append("canonicalize")
         passes.append("func.func(mppa-load-weights)")
         passes.append("func.func(mppa-copy-buffers)")
