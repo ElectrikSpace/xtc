@@ -76,6 +76,20 @@ class Annotations:
         fuse_consumer: True if consumer fusion was requested.
     """
 
+    MARKER = "$"
+    NAMES = {
+        "unroll",
+        "vectorize",
+        "parallelize",
+        "buffer",
+        "pack",
+        "pad",
+        "interchange",
+        "level",
+        "partial",
+        "full",
+    }
+
     unroll_factor: literal | None = None
     unroll_specified: bool = False
     vectorize: bool | str = False
@@ -90,6 +104,11 @@ class Annotations:
     level: str = ""
     partial: bool = False
     full: bool = False
+
+    @classmethod
+    def is_annotation(cls, decl: str):
+        if decl[0] == cls.MARKER or decl in cls.NAMES:
+            return True
 
 
 @dataclass(frozen=True)
@@ -146,7 +165,15 @@ class PRTDecl:
             raise ScheduleParseError(f"Invalid tile declaration {self.shape}")
 
 
-ScheduleItem = SplitDecl | TileDecl | AxisDecl | PRTDecl
+@dataclass(frozen=True)
+class AnnotationsDecl:
+    """Empty declaration that only contains annotations.
+    Can only have level and packing annotations."""
+
+    annotations: Annotations
+
+
+ScheduleItem = SplitDecl | TileDecl | AxisDecl | PRTDecl | AnnotationsDecl
 
 
 @dataclass(frozen=True)
@@ -162,6 +189,7 @@ class ScheduleParser:
 
     _SPLIT_PATTERN = re.compile(r"^(.*)\[(-\w+|\w*)?:(-\w+|\w*)?\]$")
     _SPLIT_MIDDLE_PATTERN = re.compile(r"^(.*)\[:(\w*):\]$")
+    _PACK_PATTERN = re.compile(r"pack\((\w+)\)")
 
     def parse(self, spec: list[tuple[str, list]] | dict[str, Any]) -> ScheduleSpec:
         """Parse a schedule specification dict into an AST."""
@@ -188,6 +216,9 @@ class ScheduleParser:
 
         if len(declaration) == 1 and declaration in ansor_tile:
             return self._parse_ansor_tile(declaration, value)
+
+        if declaration[0] == Annotations.MARKER:
+            return self._parse_annotation_decl(declaration, value)
 
         # Must be a direct axis reference
         return self._parse_axis_ref(declaration, value)
@@ -225,6 +256,15 @@ class ScheduleParser:
 
         annotations = self._parse_annotations(value, declaration)
         return AxisDecl(axis=declaration, annotations=annotations)
+
+    def _parse_annotation_decl(self, declaration: str, value: list) -> AnnotationsDecl:
+        """Parse a level with only annotataions."""
+        declaration = declaration[1:]
+        if declaration:
+            declaration = declaration.strip()
+            value.append(("level", declaration))
+        annotations = self._parse_annotations(value, declaration)
+        return AnnotationsDecl(annotations)
 
     def _parse_annotations(
         self, value: list[tuple[str, Any]], declaration: str
@@ -330,9 +370,15 @@ class ScheduleParser:
                 case "full":
                     full = True
                 case _:
-                    raise ScheduleParseError(
-                        f"Unknown annotation on {declaration}: {key}"
-                    )
+                    match = self._PACK_PATTERN.search(key)
+                    if match:
+                        pack_ = match.groups()[0]
+                        pack = (pack_, None, False)
+                        pack_specified = param if param else True
+                    else:
+                        raise ScheduleParseError(
+                            f"Unknown annotation on {declaration}: {key}"
+                        )
 
         if partial and full:
             raise ScheduleParseError(
