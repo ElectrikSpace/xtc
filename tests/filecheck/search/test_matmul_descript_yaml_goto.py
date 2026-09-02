@@ -44,11 +44,13 @@ constraints:
 schedule:
     j:
     k:
-    B: pack=pack_B pad
-    i: level=L3
-    A: pack pad=pad_A
-    j#nc: level=L2
-    i#mc: level=L1
+    $: pack(B)=pack_B
+    i:
+    $ L3: pack(A)
+    j#nc:
+    $ L2:
+    i#mc:
+    $ L1:
     k#kc: unroll=kr
     i#mr: unroll full
     j#nr: vectorize full
@@ -88,5 +90,4 @@ print(sum(1 for _ in strategy.sample(100)))
 # CHECK-NEXT: nr || {1024, nc}
 # CHECK-NEXT: nvr * mr * kr <= 256
 # CHECK-NEXT: pack_B in {0, 1}
-# CHECK-NEXT: pad_A in {0,1}
 # CHECK-NEXT: 100

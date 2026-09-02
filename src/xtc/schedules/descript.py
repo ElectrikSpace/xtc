@@ -24,6 +24,7 @@ from .parsing import (
     TileDecl,
     AxisDecl,
     PRTDecl,
+    AnnotationsDecl,
     Annotations,
     YAMLParser,
     literal,
@@ -147,6 +148,8 @@ class ScheduleInterpreter:
                     node=node,
                     axes=axes,
                 )
+            elif isinstance(item, AnnotationsDecl):
+                self._apply_annotations(item, loop_name, axes, node)
 
         # Check interchange groups only use each axis at most once
         # And create the sampling constraint
@@ -582,7 +585,7 @@ class ScheduleInterpreter:
 
     def _apply_annotations(
         self,
-        item: TileDecl | AxisDecl,
+        item: TileDecl | AxisDecl | AnnotationsDecl,
         loop_name: str,
         axes: dict[str, list[literal]],
         node: ParameterLoopNestNode,
@@ -597,7 +600,7 @@ class ScheduleInterpreter:
                     f'`{{"unroll" = {unroll_factor}}}`: unroll parameter should be strictly positive.'
                 )
             if unroll_factor is None or isinstance(unroll_factor, str):
-                if not axes[item.axis]:
+                if isinstance(item, AnnotationsDecl) or not axes[item.axis]:
                     raise ScheduleInterpretError(
                         f"{loop_name}'s size being unknown, an unroll factor is needed."
                     )
