@@ -1253,7 +1253,6 @@ try:
             for x in sample:
                 if not self._sample_shape:
                     self._sample_shape = list(x.keys())
-                    print(f"Order of the sampling variables: {self._sample_shape}")
                 yield tuple(x.values())
 
         @override
