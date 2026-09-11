@@ -1150,6 +1150,7 @@ try:
             methods = solve_with_z3(list(context.variables), properties, constraints)
             enumerations = execute_static(methods, properties, constraints)
             self._context = context
+            self._sample_names = list(context.variables)
             self._properties = properties
             self._z3_constraints = constraints
             self._methods = methods
@@ -1219,6 +1220,7 @@ try:
         @property
         @override
         def sample_names(self) -> list[str]:
+            self._initialize()
             return self._sample_names
 
     class Strategy_Descript_Explore(Strategy_Descript):
