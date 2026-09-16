@@ -648,7 +648,7 @@ class ScheduleInterpreter:
                     if isinstance(annotations.pack_specified, str):
                         node.buffer_parameters[loop_name] = annotations.pack_specified
                         node.constraints.append(
-                            f"{annotations.buffer_specified} in {{0, 1}}"
+                            f"{annotations.pack_specified} in {{0, 1}}"
                         )
                 # Read buffer
                 else:
