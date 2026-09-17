@@ -37,13 +37,20 @@ def main():
                 continue
             op, sched = m.groups()
             op = op.lower()
-            out_f = f"{output}/results.{op}.{sched}.2048.{cores}.1.jsonl"
+            out_f = f"{output}/results.c{cores}.{op}.{sched}.2048.1.jsonl"
             with open(f"{input}/{f}", "r") as f_in, open(out_f, "w") as f_out:
                 data_in = csv.DictReader(f_in)
                 data_out = [{"results": [float(r["time"])]} for r in data_in]
-                print(data_out)
+                # print(data_out)
                 for result in data_out:
                     json.dump(result, f_out)
+
+            with open(out_f, "r+") as f_out:
+                data_in = f_out.read()
+                data_out = data_in.replace("}", "}\n")
+                f_out.seek(0)
+                f_out.write(data_out)
+                f_out.truncate()
 
 
 if __name__ == "__main__":
