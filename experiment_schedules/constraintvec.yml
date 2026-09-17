@@ -15,7 +15,7 @@ constraints:
   - v_elts || nr
 schedule:
   j: parallelize
-  $: pack(C)
+  $: pack(C)=pack_c
   k:
   i:
   j#nc:
