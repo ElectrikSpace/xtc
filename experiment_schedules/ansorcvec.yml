@@ -13,7 +13,7 @@ schedule:
   j: parallelize
   i#i1:
   j#j1:
-  $: pack(C)
+  $: pack(C)=pack_c
   k:
   i#i2:
   j#j2:
