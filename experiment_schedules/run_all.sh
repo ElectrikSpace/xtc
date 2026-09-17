@@ -37,7 +37,7 @@ echo "Will apply strategies: $strategies..." >&2
 for bench in $benchs; do
     for strategy in $strategies; do
         echo "Running: $bench/$strategy..." >&2
-        (set -x; $run $taskset loop-explore --operator matmul --op-name "$bench" --descript "$strategy" --functions "ilp.py" --search "$search" --backends tvm --trials "$trials" --threads "$cores" --output "$results_dir/$bench-$strategy.csv" --batch 64 --jobs "$jobs" --peak-flops "$flops")
+        (set -x; $run $taskset loop-explore --operator matmul --op-name "$bench" --descript "$strategy" --functions "ilp.py" --search "$search" --backends tvm --trials "$trials" --threads "$cores" --output "$results_dir/$bench-$strategy-c$cores.csv" --batch 64 --jobs "$jobs" --peak-flops "$flops")
         echo "Done: date $date, bench $bench, strategy $strategy, cores $cores." >&2
     done
 done
