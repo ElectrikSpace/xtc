@@ -4,7 +4,7 @@ import re
 import csv
 import json
 
-INPUT_R = re.compile(r"(.*)-(.*)\.yml\.csv")
+INPUT_R = re.compile(r"(.*)-(.*)\.yml-c(.)\.csv")
 
 
 def main():
@@ -12,17 +12,10 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("input", type=str, help="Path to the folder containing results")
-    # parser.add_argument(
-    #     "--output",
-    #     type=str,
-    #     help="Path to the output folder"
-    # )
-    parser.add_argument("-c", type=int, default=1, help="number of cores")
 
     args = parser.parse_args()
 
     input = args.input
-    cores = args.c
 
     output = input + "/results_json/"
 
@@ -35,13 +28,13 @@ def main():
             if not m:
                 print(f"WARNING: file {f} does not match regex.")
                 continue
-            op, sched = m.groups()
+            op, sched, cores = m.groups()
             op = op.lower()
+            cores = int(cores)
             out_f = f"{output}/results.c{cores}.{op}.{sched}.2048.1.jsonl"
             with open(f"{input}/{f}", "r") as f_in, open(out_f, "w") as f_out:
                 data_in = csv.DictReader(f_in)
                 data_out = [{"results": [float(r["time"])]} for r in data_in]
-                # print(data_out)
                 for result in data_out:
                     json.dump(result, f_out)
 
