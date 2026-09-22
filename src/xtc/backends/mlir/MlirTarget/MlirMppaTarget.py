@@ -239,16 +239,20 @@ class MlirProgramToMlirMppaPass:
     def _lowering_pipeline(self) -> list[str]:
         assert "sdist" in self._mlir_program.mlir_extensions
         passes = []
+        # HW independant
         passes.append("sccp")
         passes.append("linalg-specialize-generic-ops")
         passes.append("sdist-lower-distribution")
         passes.append("sdist-insert-kernel-ops")
         passes.append("func.func(sdist-fuse-linalg-fill-ops)")
-        passes.append("sdist-group-transfers")
         passes.append("sdist-remove-intermediate-subview-ops")
-        # passes.append("convert-sdist-to-sdist-com")
-        # passes.append("convert-sdist-com-to-mppa") # TODO handle reverse read
-        passes.append("convert-sdist-to-mppa{reverse-reads=false}")
+        passes.append("convert-sdist-to-sdist-com")
+        passes.append("sdist-com-group-transfers")
+        passes.append("sdist-com-apply-double-buffering{split-outer-transfers=true}")
+        passes.append("sdist-com-tokenize-group-transfers")
+        # HW dependant lowering
+        passes.append("convert-sdist-com-to-mppa") # TODO handle reverse read
+        #passes.append("convert-sdist-to-mppa{reverse-reads=false}")
         passes.append("convert-sdist-utils-to-mppa")
         new_passes = []
         for p in passes:
@@ -295,7 +299,7 @@ class MlirMppaBackend:
     @property
     def cmd_kvx_cc(self):
         return [f"{self._csw_path}/bin/kvx-cos-clang"]
-        # return [f"{self._csw_path}/bin/kvx-cos-gcc"]
+        #return [f"{self._csw_path}/bin/kvx-cos-gcc"]
 
     @property
     def cmd_kvx_ld(self):
@@ -347,9 +351,9 @@ class MlirMppaBackend:
         passes.append("canonicalize")
         passes.append("func.func(kvxcluster-lower-promoted-memory)")
         passes.append("canonicalize")
-        passes.append(
-            "func.func(kvxcluster-optimize-dma-transfers{bundle=true pipeline=false split-pipeline-outer-dma=false})"
-        )
+        #passes.append(
+        #    "func.func(kvxcluster-optimize-dma-transfers{bundle=true pipeline=true split-pipeline-outer-dma=false})"
+        #)
         passes.append("canonicalize")
         passes.append("func.func(affine-expand-index-ops-as-affine)")
         passes.append("func.func(kvxcluster-basic-static-allocation)")
