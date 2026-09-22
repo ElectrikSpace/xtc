@@ -78,6 +78,7 @@ class MlirMppaTarget(MlirTarget):
 
         dump_tmp_file = f"{dump_tmp_dir}/{dump_base}"
         mlir_atrn_dump_file = f"{dump_base}.after_trn.mlir"
+        mlir_sdist_com_dump_file = f"{dump_base}.sdist_com.mlir"
         mlir_bmppa_dump_file = f"{dump_tmp_file}.before_mppa.mlir"
         mlir_amppa_dump_file = f"{dump_tmp_file}.after_mppa.mlir"
         c_host_dump_file = f"{dump_tmp_file}.host.c"
@@ -90,7 +91,11 @@ class MlirMppaTarget(MlirTarget):
 
         # Lower to MLIR with MPPA dialect
         save_temp(mlir_atrn_dump_file, mlir_program.mlir_module)
-        self._mlir_to_mppa_pass(mlir_program)
+        self._mlir_to_mppa_pass(
+            mlir_program,
+            save_temp=save_temp,
+            mlir_sdist_com_dump_file=mlir_sdist_com_dump_file,
+        )
 
         # Run MLIR MPPA backend
         with open(mlir_bmppa_dump_file, "w") as outf:
@@ -203,11 +208,20 @@ class MlirMppaTarget(MlirTarget):
         print(f"// -----// {title} //----- //", file=sys.stderr)
         print(str(mlir_program.mlir_module), file=sys.stderr)
 
-    def _mlir_to_mppa_pass(self, mlir_program: RawMlirProgram):
+    def _mlir_to_mppa_pass(
+        self,
+        mlir_program: RawMlirProgram,
+        *,
+        save_temp=None,
+        mlir_sdist_com_dump_file: str | None = None,
+    ):
         to_mppa_pass = MlirProgramToMlirMppaPass(
             mlir_program=mlir_program,
         )
-        to_mppa_pass.run()
+        to_mppa_pass.run(
+            save_temp=save_temp,
+            mlir_sdist_com_dump_file=mlir_sdist_com_dump_file,
+        )
         if self._config.print_lowered_ir:
             self.dump_ir(mlir_program, "IR Dump After MLIR Opt")
 
@@ -236,10 +250,17 @@ class MlirProgramToMlirMppaPass:
     ) -> None:
         self._mlir_program = mlir_program
 
-    def _lowering_pipeline(self) -> list[str]:
+    def _with_canonicalize_cse(self, passes: list[str]) -> list[str]:
+        new_passes = []
+        for p in passes:
+            new_passes.append(p)
+            new_passes.append("canonicalize")
+            new_passes.append("cse")
+        return new_passes
+
+    def _hw_independent_pipeline(self) -> list[str]:
         assert "sdist" in self._mlir_program.mlir_extensions
         passes = []
-        # HW independant
         passes.append("sccp")
         passes.append("linalg-specialize-generic-ops")
         passes.append("sdist-lower-distribution")
@@ -250,24 +271,34 @@ class MlirProgramToMlirMppaPass:
         passes.append("sdist-com-group-transfers")
         passes.append("sdist-com-apply-double-buffering{split-outer-transfers=true}")
         passes.append("sdist-com-tokenize-group-transfers")
-        # HW dependant lowering
-        passes.append("convert-sdist-com-to-mppa") # TODO handle reverse read
-        #passes.append("convert-sdist-to-mppa{reverse-reads=false}")
-        passes.append("convert-sdist-utils-to-mppa")
-        new_passes = []
-        for p in passes:
-            new_passes.append(p)
-            new_passes.append("canonicalize")
-            new_passes.append("cse")
-        return new_passes
+        return self._with_canonicalize_cse(passes)
 
-    def run(self) -> None:
-        self._mlir_program.mlir_context.allow_unregistered_dialects = True
+    def _hw_dependent_pipeline(self) -> list[str]:
+        passes = []
+        # HW dependant lowering
+        passes.append("convert-sdist-com-to-mppa")  # TODO handle reverse read
+        # passes.append("convert-sdist-to-mppa{reverse-reads=false}")
+        passes.append("convert-sdist-utils-to-mppa")
+        return self._with_canonicalize_cse(passes)
+
+    def _run_passes(self, passes: list[str]) -> None:
         pm = PassManager(context=self._mlir_program.mlir_context)
         pm.enable_verifier(False)
-        for opt in self._lowering_pipeline():
-            pm.add(opt)  # type: ignore # no attribte add?
+        for opt in passes:
+            pm.add(opt)  # type: ignore # no attribute add?
         pm.run(self._mlir_program.mlir_module.operation)
+
+    def run(
+        self,
+        *,
+        save_temp=None,
+        mlir_sdist_com_dump_file: str | None = None,
+    ) -> None:
+        self._mlir_program.mlir_context.allow_unregistered_dialects = True
+        self._run_passes(self._hw_independent_pipeline())
+        if save_temp is not None and mlir_sdist_com_dump_file is not None:
+            save_temp(mlir_sdist_com_dump_file, self._mlir_program.mlir_module)
+        self._run_passes(self._hw_dependent_pipeline())
         self._mlir_program.mlir_context.allow_unregistered_dialects = False
 
 
