@@ -38,9 +38,10 @@ _SDIST_PASSES = [
     "sdist-lower-distribution",
     "sdist-insert-kernel-ops",
     "func.func(sdist-fuse-linalg-fill-ops)",
-    "sdist-group-transfers",
     "sdist-remove-intermediate-subview-ops",
     "convert-sdist-to-sdist-com",
+    "sdist-com-group-transfers",
+    "sdist-com-apply-double-buffering",
     "lower-affine",
 ]
 
@@ -104,6 +105,7 @@ class SDistComPredictorModel(itf.pred.PredictModel):
         # Run the simulator
         #result = simulate(loopnest, self._machine_model, log_file, double_buffering=True)
         result = simulate(loopnest, self._machine_model, log_file, double_buffering=False)
+        print(result)
         return result.total_cycles
 
     def _reset_mlir_program(self) -> None:
