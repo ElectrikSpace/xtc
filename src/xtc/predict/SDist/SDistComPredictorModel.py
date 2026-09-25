@@ -59,8 +59,10 @@ class SDistComPredictorModel(itf.pred.PredictModel):
         machine_description_path: Path | None,
         trace_path: str | Path | None = None,
         efficiency_path: str | Path | None = None,
+        verbose: bool = False,
     ):
         self._backend = backend
+        self._verbose = verbose
 
         if machine_description_path is None:
             raise ValueError("Machine description is required")
@@ -107,6 +109,8 @@ class SDistComPredictorModel(itf.pred.PredictModel):
                 result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             except subprocess.CalledProcessError as exc:
                 raise RuntimeError(f"sdist-simulator failed: {exc.stderr}") from exc
+            if self._verbose:
+                print(result.stdout, end="")
             match = re.search(
                 r"^elapsed_cycles:\s*(\d+(?:\.\d+)?)\s*$",
                 result.stdout,

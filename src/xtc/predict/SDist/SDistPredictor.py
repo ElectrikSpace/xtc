@@ -29,9 +29,11 @@ class SDistPredictor(itf.pred.Predictor):
         self,
         graph: "itf.graph.Graph",
         machine_description_path: str | Path | None = None,
+        verbose: bool = False,
         **backend_kwargs: Any,
     ):
         self._backend = MlirGraphBackend(graph, **backend_kwargs)
+        self._verbose = verbose
         self._machine_description_path = (
             Path(machine_description_path)
             if machine_description_path is not None
@@ -55,6 +57,7 @@ class SDistPredictor(itf.pred.Predictor):
             self._machine_description_path,
             trace_path=trace_path,
             efficiency_path=efficiency_path,
+            verbose=self._verbose,
         )
 
     @property
