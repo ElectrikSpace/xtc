@@ -6,7 +6,7 @@ dir="$(dirname "$0")"
 date="${DATE:-$(date +"%Y%m%d_%H%M%S")}"
 benchs="${BENCHS:-$(cat default_names.txt)}"
 strategies="${STRATEGIES- ansorcvec.yml ttile.yml constraintvec.yml}"
-# seeds="${SEEDS:-$(seq 1 5)}"
+seeds="${SEEDS:-$(seq 1 5)}"
 cores="${CORES:-1}"
 dry="${DRY:-}"
 search="${SEARCH:-random}"
@@ -34,11 +34,13 @@ echo "Will run benchs: $benchs..." >&2
 echo "Will apply strategies: $strategies..." >&2
 
 # session_tag="run_all_ics/$host/$USER/$date"
-for bench in $benchs; do
-    for strategy in $strategies; do
-        echo "Running: $bench/$strategy..." >&2
-        (set -x; $run $taskset loop-explore --operator matmul --op-name "$bench" --descript "$strategy" --functions "ilp.py" --search "$search" --backends tvm --trials "$trials" --threads "$cores" --output "$results_dir/$bench-$strategy-c$cores.csv" --batch 64 --jobs "$jobs" --peak-flops "$flops")
-        echo "Done: date $date, bench $bench, strategy $strategy, cores $cores." >&2
+for seed in $seeds; do
+    for bench in $benchs; do
+        for strategy in $strategies; do
+            echo "Running: $bench/$strategy..." >&2
+            (set -x; $run $taskset loop-explore --operator matmul --op-name "$bench" --descript "$strategy" --functions "ilp.py" --search "$search" --backends tvm --trials "$trials" --threads "$cores" --output "$results_dir/$bench-$strategy-c$cores-$seed.csv" --batch 64 --jobs "$jobs" --peak-flops "$flops" --seed "$seed")
+            echo "Done: date $date, bench $bench, strategy $strategy, cores $cores." >&2
+        done
     done
 done
 echo "Done: date $date, cores $cores." >&2
