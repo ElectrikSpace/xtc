@@ -4,7 +4,7 @@ import re
 import csv
 import json
 
-INPUT_R = re.compile(r"(.*)-(.*)\.yml-c(.)-(.*)\.csv")
+INPUT_R = re.compile(r"(.*)-(.*)\.yml-c(.)(-(.*))?\.csv")
 
 
 def main():
@@ -12,10 +12,12 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("input", type=str, help="Path to the folder containing results")
+    parser.add_argument("-b", "--batch", type=int, default=64, help="Batch size")
 
     args = parser.parse_args()
 
     input = args.input
+    batch = args.batch
 
     output = input + "/results_json/"
 
@@ -23,16 +25,17 @@ def main():
         os.mkdir(output)
 
     for f in os.listdir(input):
+        print(f)
         if f.endswith(".csv"):
             m = INPUT_R.match(f)
             if not m:
                 print(f"WARNING: file {f} does not match regex.")
                 continue
-            op, sched, cores, seed = m.groups()
+            op, sched, cores, _, seed = m.groups()
             op = op.lower()
             cores = int(cores)
-            seed = int(seed)
-            out_f = f"{output}/results.c{cores}.{op}.{sched}.2048.{seed}.jsonl"
+            seed = int(seed) if seed else 1
+            out_f = f"{output}/results.c{cores}.{op}.{sched}.{batch}.2048.{seed}.jsonl"
             with open(f"{input}/{f}", "r") as f_in, open(out_f, "w") as f_out:
                 data_in = csv.DictReader(f_in)
                 data_out = [{"results": [float(r["time"])]} for r in data_in]
