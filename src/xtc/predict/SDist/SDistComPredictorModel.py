@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
-import sys
+import re
+import shutil
 import subprocess
-import os
+import sys
+import tempfile
 from pathlib import Path
 from typing import cast
 from typing_extensions import override
@@ -20,18 +22,9 @@ from xtc.backends.mlir.MlirProgram import MlirProgram
 from xtc.backends.mlir.MlirScheduler import MlirSchedule
 from xtc.backends.mlir.MlirTarget import get_target_from_name
 
-from mlir_sdist.trace_analyzer import (
-    load_metadata,
-    load_machine_model,
-    simulate,
-)
-
-# The sdist lowering pipeline, up to (and including) the
-# `sdist-remove-intermediate-subview-ops` pass. This is a deliberate copy of
-# (a prefix of) the pipeline used by MlirMppaTarget's
-# MlirProgramToMlirMppaPass._lowering_pipeline(): the two are allowed to
-# diverge over time as the SDist cost model evolves independently from the
-# actual MPPA code generation pipeline.
+# This lowering pipeline is adapted from the prefix used by
+# MlirMppaTarget's MlirProgramToMlirMppaPass._lowering_pipeline(); the two may
+# diverge as the SDist cost model evolves independently from MPPA codegen.
 _SDIST_PASSES = [
     "sccp",
     "linalg-specialize-generic-ops",
@@ -41,19 +34,15 @@ _SDIST_PASSES = [
     "sdist-remove-intermediate-subview-ops",
     "convert-sdist-to-sdist-com",
     "sdist-com-group-transfers",
+    "sdist-split-for-distributed",
     "sdist-com-apply-double-buffering",
+    "sdist-com-tokenize-group-transfers",
     "lower-affine",
 ]
 
 
 class SDistComPredictorModel(itf.pred.PredictModel):
-    """A cost model for the SDist predictor.
-
-    This is a placeholder implementation: it lowers the schedule through the
-    sdist pipeline (see `_SDIST_PASSES`), up to (and including) the
-    `sdist-remove-intermediate-subview-ops` pass, then prints the resulting
-    IR and returns a random value for any given schedule. Actual cost
-    estimation is not implemented yet.
+    """Estimate schedule cost by lowering to SDist IR and simulating it.
 
     The MlirProgram and its MlirProgramCompiler only depend on the backend
     (graph, extensions, target, ...), not on the schedule being predicted, so
@@ -62,14 +51,14 @@ class SDistComPredictorModel(itf.pred.PredictModel):
     it is reset back to its pristine (unscheduled) state before each use.
     """
 
-    def __init__(self, backend: "itf.pred.Predictor", machine_description_path: Path | None):
+    def __init__(
+        self, backend: "itf.pred.Predictor", machine_description_path: Path | None
+    ):
         self._backend = backend
 
-        # Load machine model
-        assert machine_description_path is not None, "Machine description is required"
-        # FIXME for debug
-        full_path =  os.path.join(machine_description_path)
-        self._machine_model = load_machine_model(full_path)
+        if machine_description_path is None:
+            raise ValueError("Machine description is required")
+        self._machine_description_path = machine_description_path.resolve()
 
         mlir_backend = backend.mlir_backend
         config = MlirConfig(required_extensions=["sdist"])
@@ -91,22 +80,31 @@ class SDistComPredictorModel(itf.pred.PredictModel):
 
     @override
     def predict(self, schedule: "itf.schd.Schedule") -> float:
-        sdist_com_dump_file = "/tmp/sdist_com.mlir"
-        loopnest_dump_file = "/tmp/loopnest.json"
-        log_file = "/tmp/trace.log"
-
-        # Lower down to SDistCom Dialect
-        self._run_sdist_pipeline(cast(MlirSchedule, schedule), sdist_com_dump_file)
-        # Extract the decorated LoopNest
-        self._run_loopnest_extraction(sdist_com_dump_file, loopnest_dump_file)
-        # Load the LoopNest in the simulator
-        loopnest = load_metadata(loopnest_dump_file)
-
-        # Run the simulator
-        #result = simulate(loopnest, self._machine_model, log_file, double_buffering=True)
-        result = simulate(loopnest, self._machine_model, log_file, double_buffering=False)
-        print(result)
-        return result.total_cycles
+        with tempfile.TemporaryDirectory(prefix="sdist-predict-") as temp_dir:
+            ir_path = Path(temp_dir) / "sdist_com.mlir"
+            trace_path = Path(temp_dir) / "trace.json"
+            self._run_sdist_pipeline(cast(MlirSchedule, schedule), str(ir_path))
+            cmd = [
+                *self.cmd_sdist_simulator,
+                str(ir_path),
+                f"--machine-model={self._machine_description_path}",
+                f"--trace={trace_path}",
+                "--double-buffering=false",
+            ]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            except subprocess.CalledProcessError as exc:
+                raise RuntimeError(f"sdist-simulator failed: {exc.stderr}") from exc
+            match = re.search(
+                r"^elapsed_cycles:\s*(\d+(?:\.\d+)?)\s*$",
+                result.stdout,
+                re.MULTILINE,
+            )
+            if match is None:
+                raise ValueError(
+                    f"sdist-simulator did not report elapsed_cycles: {result.stdout}"
+                )
+            return float(match.group(1))
 
     def _reset_mlir_program(self) -> None:
         self._mlir_program.module = Module.parse(
@@ -147,43 +145,14 @@ class SDistComPredictorModel(itf.pred.PredictModel):
         pm.run(mlir_program.mlir_module.operation)
         mlir_program.mlir_context.allow_unregistered_dialects = False
 
-    def _execute_command(
-        self,
-        cmd: list[str],
-        input_pipe: str | None = None,
-        pipe_stdoutput: bool = True,
-    ) -> subprocess.CompletedProcess:
-        pretty_cmd = "| " if input_pipe else ""
-        pretty_cmd += " ".join(cmd)
-        #if self._config.debug:
-        #    print(f"> exec: {pretty_cmd}", file=sys.stderr)
-
-        if input_pipe and pipe_stdoutput:
-            result = subprocess.run(
-                cmd, input=input_pipe, stdout=subprocess.PIPE, text=True
-            )
-        elif input_pipe and not pipe_stdoutput:
-            result = subprocess.run(cmd, input=input_pipe, text=True)
-        elif not input_pipe and pipe_stdoutput:
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
-        else:
-            result = subprocess.run(cmd, text=True)
-        return result
-
-    def _run_loopnest_extraction(self, sdist_com_dump_file: str, loopnest_dump_file: str) -> None:
-        cmd = self.cmd_sdist_extract + [
-            "--sdist-get-infos",
-            sdist_com_dump_file,
-            "-o",
-            loopnest_dump_file,
-        ]
-        exe_process = self._execute_command(cmd=cmd)
-        assert exe_process.returncode == 0
-
     @property
-    def cmd_sdist_extract(self):
+    def cmd_sdist_simulator(self) -> list[str]:
+        simulator = shutil.which("sdist-simulator")
+        if simulator is not None:
+            return [simulator]
+
         mlir_path = get_mlir_prefix()
-        return [f"{mlir_path}/bin/sdist-extract"]
+        return [f"{mlir_path}/bin/sdist-simulator"]
 
     @property
     @override
