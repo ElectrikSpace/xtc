@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from mlir_utils import requires_mlir, matmul_graph, matmul_impl
 
@@ -40,7 +43,7 @@ def test_sdist_predictor_reuses_backend_scheduler():
 @requires_mlir()
 def test_sdist_predictor_get_model_returns_com_predictor_model():
     graph = matmul_graph(4, 32, 512, "float32", "matmul")
-    predictor = SDistPredictor(graph)
+    predictor = SDistPredictor(graph, machine_description_path="machine.yaml")
 
     model = predictor.get_model()
 
@@ -50,12 +53,23 @@ def test_sdist_predictor_get_model_returns_com_predictor_model():
 
 
 @requires_mlir()
-def test_sdist_com_predictor_model_predict_returns_random_value_in_unit_range():
+def test_sdist_com_predictor_model_predict_returns_elapsed_cycles(monkeypatch):
     graph = matmul_graph(4, 32, 512, "float32", "matmul")
-    predictor = SDistPredictor(graph)
+    predictor = SDistPredictor(graph, machine_description_path="machine.yaml")
     model = predictor.get_model()
+    commands = []
+
+    def simulate(cmd, **kwargs):
+        commands.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd, 0, "compute_cycles: 10.0\nelapsed_cycles: 42.5\n", ""
+        )
+
+    monkeypatch.setattr(subprocess, "run", simulate)
 
     scheduler = predictor.get_scheduler()
+    scheduler.define_memory_mesh(axes={"mx": 1})
+    scheduler.define_processor_mesh(axes={"px": 1, "psx": 1})
     scheduler.tile("i", {"i1": 2})
     scheduler.interchange(["i", "j", "k", "i1"])
     schedule = scheduler.schedule()
@@ -63,40 +77,80 @@ def test_sdist_com_predictor_model_predict_returns_random_value_in_unit_range():
     cost = model.predict(schedule)
 
     assert isinstance(cost, float)
-    assert 0.0 <= cost <= 1.0
+    assert cost == 42.5
+    assert len(commands) == 1
+    assert commands[0][0].endswith("sdist-simulator")
+    assert any(arg.startswith("--machine-model=") for arg in commands[0])
+    assert "--double-buffering=false" in commands[0]
 
 
 @requires_mlir()
-def test_sdist_com_predictor_model_predict_is_random():
+def test_sdist_com_predictor_model_rejects_missing_cycles(monkeypatch):
     graph = matmul_graph(4, 32, 512, "float32", "matmul")
-    predictor = SDistPredictor(graph)
+    predictor = SDistPredictor(graph, machine_description_path="machine.yaml")
     model = predictor.get_model()
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, "no cycles\n", ""),
+    )
 
     scheduler = predictor.get_scheduler()
+    scheduler.define_memory_mesh(axes={"mx": 1})
+    scheduler.define_processor_mesh(axes={"px": 1, "psx": 1})
     schedule = scheduler.schedule()
 
-    costs = {model.predict(schedule) for _ in range(20)}
-
-    # It is astronomically unlikely for 20 random floats to collide.
-    assert len(costs) > 1
+    with pytest.raises(ValueError, match="did not report elapsed_cycles"):
+        model.predict(schedule)
 
 
 @requires_mlir()
-def test_sdist_com_predictor_model_predict_handles_sequential_schedules(capsys):
+def test_sdist_com_predictor_model_reports_simulator_failure(monkeypatch):
+    graph = matmul_graph(4, 32, 512, "float32", "matmul")
+    predictor = SDistPredictor(graph, machine_description_path="machine.yaml")
+    model = predictor.get_model()
+
+    def fail(cmd, **kwargs):
+        raise subprocess.CalledProcessError(1, cmd, stderr="invalid IR")
+
+    monkeypatch.setattr(subprocess, "run", fail)
+    scheduler = predictor.get_scheduler()
+    scheduler.define_memory_mesh(axes={"mx": 1})
+    scheduler.define_processor_mesh(axes={"px": 1, "psx": 1})
+
+    with pytest.raises(RuntimeError, match="sdist-simulator failed: invalid IR"):
+        model.predict(scheduler.schedule())
+
+
+@requires_mlir()
+def test_sdist_com_predictor_model_predict_handles_sequential_schedules(
+    capsys, monkeypatch
+):
     # The MlirProgram and its MlirProgramCompiler are built once for the
     # model and reused across `predict` calls: make sure the underlying MLIR
     # module is correctly reset between two different schedules, so that
     # lowering the second schedule is not affected by the first one.
     graph = matmul_graph(4, 32, 512, "float32", "matmul")
-    predictor = SDistPredictor(graph)
+    predictor = SDistPredictor(graph, machine_description_path="machine.yaml")
     model = predictor.get_model()
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd, 0, "elapsed_cycles: 42.5\n", ""
+        ),
+    )
 
     scheduler1 = predictor.get_scheduler()
+    scheduler1.define_memory_mesh(axes={"mx": 1})
+    scheduler1.define_processor_mesh(axes={"px": 1, "psx": 1})
     scheduler1.tile("i", {"i1": 2})
     scheduler1.interchange(["i", "j", "k", "i1"])
     schedule1 = scheduler1.schedule()
 
     scheduler2 = predictor.get_scheduler()
+    scheduler2.define_memory_mesh(axes={"mx": 1})
+    scheduler2.define_processor_mesh(axes={"px": 1, "psx": 1})
     scheduler2.tile("j", {"j1": 4})
     scheduler2.interchange(["j", "i", "k", "j1"])
     schedule2 = scheduler2.schedule()
@@ -114,7 +168,7 @@ def test_sdist_com_predictor_model_predict_handles_sequential_schedules(capsys):
 
     for cost in (cost1, cost2, cost1_again):
         assert isinstance(cost, float)
-        assert 0.0 <= cost <= 1.0
+        assert cost == 42.5
 
     assert '"./i1"' in ir_after_schedule1
     assert '"./j1"' not in ir_after_schedule1
