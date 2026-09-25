@@ -1,0 +1,17 @@
+constraints:
+  - max_l1_elts := 8192
+  - max_l2_elts := 262144
+  - max_l3_elts := 9437184
+  - nr * kc <= max_l1_elts
+  - mc * kc <= max_l2_elts
+  - nc * kc <= max_l3_elts
+schedule:
+  j: parallelize
+  $: pack(C)=pack_c
+  k:
+  i:
+  j#nc:
+  i#mc:
+  k#kc: unroll=ku
+  i#mr: unroll
+  j#nr: vectorize
