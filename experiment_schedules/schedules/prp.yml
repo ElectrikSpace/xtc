@@ -1,0 +1,14 @@
+constraints:
+  - ku <= 64
+schedule:
+  i: parallelize
+  j: parallelize
+  i#i1:
+  j#j1:
+  $: pack(C)=pack_c
+  k:
+  i#i2:
+  j#j2:
+  k#k1: unroll=ku
+  i#i3: unroll
+  j#j3: vectorize
