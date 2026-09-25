@@ -81,7 +81,53 @@ def test_sdist_com_predictor_model_predict_returns_elapsed_cycles(monkeypatch):
     assert len(commands) == 1
     assert commands[0][0].endswith("sdist-simulator")
     assert any(arg.startswith("--machine-model=") for arg in commands[0])
+    assert not any(arg.startswith("--trace") for arg in commands[0])
+    assert not any(arg.startswith("--efficiency") for arg in commands[0])
     assert "--double-buffering=false" in commands[0]
+
+
+@requires_mlir()
+def test_sdist_com_predictor_model_writes_trace_when_requested(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    graph = matmul_graph(4, 32, 512, "float32", "matmul")
+    predictor = SDistPredictor(graph, machine_description_path="machine.yaml")
+    model = predictor.get_model(trace_path="prediction.json")
+    trace_path = tmp_path / "prediction.json"
+
+    def simulate(cmd, **kwargs):
+        assert f"--trace={trace_path}" in cmd
+        trace_path.write_text('{"traceEvents": []}')
+        return subprocess.CompletedProcess(cmd, 0, "elapsed_cycles: 42.5\n", "")
+
+    monkeypatch.setattr(subprocess, "run", simulate)
+    scheduler = predictor.get_scheduler()
+    scheduler.define_memory_mesh(axes={"mx": 1})
+    scheduler.define_processor_mesh(axes={"px": 1, "psx": 1})
+
+    assert model.predict(scheduler.schedule()) == 42.5
+    assert trace_path.read_text() == '{"traceEvents": []}'
+
+
+@requires_mlir()
+def test_sdist_com_predictor_model_applies_efficiency_overlay(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    graph = matmul_graph(4, 32, 512, "float32", "matmul")
+    predictor = SDistPredictor(graph, machine_description_path="machine.yaml")
+    model = predictor.get_model(
+        trace_path="prediction.json", efficiency_path="cv2_efficiency.yaml"
+    )
+
+    def simulate(cmd, **kwargs):
+        assert f"--efficiency={tmp_path / 'cv2_efficiency.yaml'}" in cmd
+        assert f"--trace={tmp_path / 'prediction.json'}" in cmd
+        return subprocess.CompletedProcess(cmd, 0, "elapsed_cycles: 42.5\n", "")
+
+    monkeypatch.setattr(subprocess, "run", simulate)
+    scheduler = predictor.get_scheduler()
+    scheduler.define_memory_mesh(axes={"mx": 1})
+    scheduler.define_processor_mesh(axes={"px": 1, "psx": 1})
+
+    assert model.predict(scheduler.schedule()) == 42.5
 
 
 @requires_mlir()

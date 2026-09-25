@@ -43,8 +43,19 @@ class SDistPredictor(itf.pred.Predictor):
         return self._backend.get_scheduler(**kwargs)
 
     @override
-    def get_model(self, **kwargs: Any) -> SDistComPredictorModel:
-        return SDistComPredictorModel(self, self._machine_description_path)
+    def get_model(
+        self,
+        trace_path: str | Path | None = None,
+        efficiency_path: str | Path | None = None,
+        **kwargs: Any,
+    ) -> SDistComPredictorModel:
+        """Create a model with optional trace and efficiency-overlay paths."""
+        return SDistComPredictorModel(
+            self,
+            self._machine_description_path,
+            trace_path=trace_path,
+            efficiency_path=efficiency_path,
+        )
 
     @property
     @override

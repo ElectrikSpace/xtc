@@ -49,16 +49,26 @@ class SDistComPredictorModel(itf.pred.PredictModel):
     they are built once, here, and reused for every call to `predict`. Since
     the underlying MLIR module is mutated in place while lowering a schedule,
     it is reset back to its pristine (unscheduled) state before each use.
+    When trace_path is set, each prediction writes a JSON trace there.
+    When efficiency_path is set, the simulator applies that YAML overlay.
     """
 
     def __init__(
-        self, backend: "itf.pred.Predictor", machine_description_path: Path | None
+        self,
+        backend: "itf.pred.Predictor",
+        machine_description_path: Path | None,
+        trace_path: str | Path | None = None,
+        efficiency_path: str | Path | None = None,
     ):
         self._backend = backend
 
         if machine_description_path is None:
             raise ValueError("Machine description is required")
         self._machine_description_path = machine_description_path.resolve()
+        self._trace_path = Path(trace_path).resolve() if trace_path is not None else None
+        self._efficiency_path = (
+            Path(efficiency_path).resolve() if efficiency_path is not None else None
+        )
 
         mlir_backend = backend.mlir_backend
         config = MlirConfig(required_extensions=["sdist"])
@@ -82,15 +92,17 @@ class SDistComPredictorModel(itf.pred.PredictModel):
     def predict(self, schedule: "itf.schd.Schedule") -> float:
         with tempfile.TemporaryDirectory(prefix="sdist-predict-") as temp_dir:
             ir_path = Path(temp_dir) / "sdist_com.mlir"
-            trace_path = Path(temp_dir) / "trace.json"
             self._run_sdist_pipeline(cast(MlirSchedule, schedule), str(ir_path))
             cmd = [
                 *self.cmd_sdist_simulator,
                 str(ir_path),
                 f"--machine-model={self._machine_description_path}",
-                f"--trace={trace_path}",
                 "--double-buffering=false",
             ]
+            if self._trace_path is not None:
+                cmd.append(f"--trace={self._trace_path}")
+            if self._efficiency_path is not None:
+                cmd.append(f"--efficiency={self._efficiency_path}")
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             except subprocess.CalledProcessError as exc:
