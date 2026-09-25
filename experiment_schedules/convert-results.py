@@ -4,7 +4,7 @@ import re
 import csv
 import json
 
-INPUT_R = re.compile(r"(.*)-(.*)\.yml-c(.)\.csv")
+INPUT_R = re.compile(r"(.*)-(.*)\.yml-c(.)-(.*)\.csv")
 
 
 def main():
@@ -28,10 +28,11 @@ def main():
             if not m:
                 print(f"WARNING: file {f} does not match regex.")
                 continue
-            op, sched, cores = m.groups()
+            op, sched, cores, seed = m.groups()
             op = op.lower()
             cores = int(cores)
-            out_f = f"{output}/results.c{cores}.{op}.{sched}.2048.1.jsonl"
+            seed = int(seed)
+            out_f = f"{output}/results.c{cores}.{op}.{sched}.2048.{seed}.jsonl"
             with open(f"{input}/{f}", "r") as f_in, open(out_f, "w") as f_out:
                 data_in = csv.DictReader(f_in)
                 data_out = [{"results": [float(r["time"])]} for r in data_in]
