@@ -87,6 +87,30 @@ def test_sdist_com_predictor_model_predict_returns_elapsed_cycles(monkeypatch):
 
 
 @requires_mlir()
+def test_sdist_com_predictor_model_prints_stdout_when_verbose(capsys, monkeypatch):
+    graph = matmul_graph(4, 32, 512, "float32", "matmul")
+    predictor = SDistPredictor(
+        graph, machine_description_path="machine.yaml", verbose=True
+    )
+    model = predictor.get_model()
+    simulator_stdout = "compute_cycles: 10.0\nelapsed_cycles: 42.5\n"
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd, 0, simulator_stdout, ""
+        ),
+    )
+
+    scheduler = predictor.get_scheduler()
+    scheduler.define_memory_mesh(axes={"mx": 1})
+    scheduler.define_processor_mesh(axes={"px": 1, "psx": 1})
+
+    assert model.predict(scheduler.schedule()) == 42.5
+    assert capsys.readouterr().out == simulator_stdout
+
+
+@requires_mlir()
 def test_sdist_com_predictor_model_writes_trace_when_requested(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     graph = matmul_graph(4, 32, 512, "float32", "matmul")
