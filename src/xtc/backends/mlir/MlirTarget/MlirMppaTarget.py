@@ -34,6 +34,7 @@ from mlir.dialects import transform
 
 __all__ = ["MlirMppaTarget"]
 
+USE_SDIST_COM = True
 
 class MlirMppaTarget(MlirTarget):
     """Kalray MPPA Target
@@ -267,18 +268,21 @@ class MlirProgramToMlirMppaPass:
         passes.append("sdist-insert-kernel-ops")
         passes.append("func.func(sdist-fuse-linalg-fill-ops)")
         passes.append("sdist-remove-intermediate-subview-ops")
-        passes.append("convert-sdist-to-sdist-com")
-        passes.append("sdist-com-group-transfers")
-        passes.append("sdist-split-for-distributed")
-        passes.append("sdist-com-apply-double-buffering{split-outer-transfers=true}")
-        passes.append("sdist-com-tokenize-group-transfers")
+        if USE_SDIST_COM:
+          passes.append("convert-sdist-to-sdist-com")
+          passes.append("sdist-com-group-transfers")
+          passes.append("sdist-split-for-distributed")
+          passes.append("sdist-com-apply-double-buffering{split-outer-transfers=true}")
+          passes.append("sdist-com-tokenize-group-transfers")
         return self._with_canonicalize_cse(passes)
 
     def _hw_dependent_pipeline(self) -> list[str]:
         passes = []
         # HW dependant lowering
-        passes.append("convert-sdist-com-to-mppa")  # TODO handle reverse read
-        # passes.append("convert-sdist-to-mppa{reverse-reads=false}")
+        if USE_SDIST_COM:
+            passes.append("convert-sdist-com-to-mppa")  # TODO handle reverse read
+        else:
+            passes.append("convert-sdist-to-mppa{reverse-reads=false}")
         passes.append("convert-sdist-utils-to-mppa")
         return self._with_canonicalize_cse(passes)
 
