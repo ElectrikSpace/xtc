@@ -19,7 +19,7 @@ class MlirNodeBackend(MlirBackend):
     def __init__(
         self,
         source_op: xdslOperation,
-        dims: list[str],
+        dims: list[str] | dict[str, int],
         payload_name: str = "f",
         concluding_passes: list[str] = [],
         loop_stamps: list[str] = [],
@@ -45,6 +45,7 @@ class MlirNodeBackend(MlirBackend):
             no_alias=no_alias,
         )
         self.dims = dims
+        self.dim_sizes = dims.copy() if isinstance(dims, dict) else None
         self.source_op = source_op
         # Specification of transformations
         self.loop_stamps = loop_stamps

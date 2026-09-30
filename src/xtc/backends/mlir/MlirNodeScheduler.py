@@ -5,8 +5,7 @@
 from typing import Literal
 
 from typing_extensions import override
-from dataclasses import dataclass, asdict
-
+from dataclasses import dataclass, asdict, field
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
 from xtc.schedules.loop_names import make_loop_name
 from xtc.schedules.plain_schedule import PlainNodeSchedule, PlainNodeScheduler
@@ -30,7 +29,8 @@ def basename(loop_name: str) -> str:
 
 @dataclass(frozen=True)
 class MlirNodeSchedule(PlainNodeSchedule):
-    pass
+    dim_sizes: dict[str, int] | None = field(default=None, repr=False)
+
 
 class MlirNodeScheduler:
     def __init__(
@@ -39,12 +39,14 @@ class MlirNodeScheduler:
         node_ident: str,
         dims: list[str],
         loop_stamps: list[str] = [],
+        dim_sizes: dict[str, int] | None = None,
     ) -> None:
         self._plain_sch = PlainNodeScheduler(
             node_name,
             node_ident,
             dims,
         )
+        self._dim_sizes = dim_sizes
 
     @property
     def node_name(self) -> str:
@@ -137,7 +139,9 @@ class MlirNodeScheduler:
 
     def get_node_schedule(self) -> MlirNodeSchedule:
         plain_schedule = self._plain_sch.get_plain_schedule()
-        return MlirNodeSchedule(**asdict(plain_schedule))
+        return MlirNodeSchedule(
+            **asdict(plain_schedule), dim_sizes=self._dim_sizes
+        )
 
     @override
     def __str__(self) -> str:
