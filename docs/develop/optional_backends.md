@@ -57,6 +57,23 @@ XTC supports the Kalray MPPA (Coolidge v2) as a target. To us this target, you n
 Then, you can test the installation using:
     python tests/filecheck/backends/target_mppa/test_matmul_mlir_mppa.py
 
+MLIR/MPPA compilation raises `XtcCompileError` (`xtc.errors`) when an MLIR native
+pass aborts or an external tool fails. The error identifies the stage and includes
+the native diagnostic; external tool errors also include the command and exit
+status. MPPA native execution failures raise `XtcRuntimeError` with the stage,
+signal, and diagnostic. Ordinary output-validation failures still return
+`(measurements, nonzero_status, message)` from `evaluator.evaluate()`.
+
+Crash isolation is enabled by default on this target. To run in-process while
+debugging with a native debugger, pass `isolate_compile=False` to
+`backend.get_compiler(...)` and/or `isolate_execution=False` to
+`module.get_evaluator(...)` (or `module.get_executor(...)`). Without isolation,
+a native abort can terminate Python. Isolated MPPA evaluation must begin before
+the device has been initialized in the parent process; device-backed input
+`NDArray` objects cannot be passed to the worker. Use host arrays for explicit
+parameters. Compilation IR dumps and `save_temps` remain available for
+diagnosing failures.
+
 ### Nvidia GPU target
 
 XTC supports Nvidia GPUs as an experimental target. To use this target, you need several dependencies:

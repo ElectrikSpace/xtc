@@ -31,6 +31,8 @@ from xtc.backends.mlir.MlirTarget import (
 )
 from xtc.utils.ext_tools import get_shlib_extension
 from xtc.itf.runtime.common import CommonRuntimeInterface
+from xtc.errors import XtcCompileError
+from xtc.utils.isolation import mark_isolated_stage, run_isolated
 
 
 class MlirCompiler(itf.comp.Compiler):
@@ -78,39 +80,52 @@ class MlirCompiler(itf.comp.Compiler):
         if self.dump_file is None:
             temp_dir = tempfile.mkdtemp()
             self.dump_file = f"{temp_dir}/{self._backend.payload_name}"
-        program = self.generate_program()
-        compiler = MlirProgramCompiler(
-            mlir_program=program,
-            mlir_schedule=mlir_schedule,
-            concluding_passes=self._backend.concluding_passes,
-            always_vectorize=self._backend.always_vectorize,
-            config=self._config,
-            target=self._target,
-            dump_file=self.dump_file,
-        )
-        assert compiler.dump_file is not None
-        compiler.compile()
-        io_specs_args = {}
-        if self._backend._graph is None:
-            # Pass backend defined inputs/outputs specs when not a Graph
-            io_specs_args.update(
-                {
-                    "np_inputs_spec": self._backend.np_inputs_spec,
-                    "np_outputs_spec": self._backend.np_outputs_spec,
-                }
+
+        def compile_program() -> None:
+            mark_isolated_stage("MLIR program creation")
+            program = self.generate_program()
+            mark_isolated_stage("MLIR compiler initialization")
+            compiler = MlirProgramCompiler(
+                mlir_program=program,
+                mlir_schedule=mlir_schedule,
+                concluding_passes=self._backend.concluding_passes,
+                always_vectorize=self._backend.always_vectorize,
+                config=self._config,
+                target=self._target,
+                dump_file=self.dump_file,
             )
-        module = self._target.create_module(
-            Path(compiler.dump_file).name,
-            self._backend.payload_name,
-            f"{compiler.dump_file}.{get_shlib_extension()}",
-            "shlib",
-            bare_ptr=self._config.bare_ptr,
-            graph=self._backend._graph,
-            **io_specs_args,
-        )
-        if temp_dir is not None:
-            shutil.rmtree(temp_dir)
-        return module
+            compiler.compile()
+
+        try:
+            if self._target.name() == "mppa" and self._config.isolate_compile:
+                run_isolated(
+                    compile_program,
+                    error_type=XtcCompileError,
+                    stage="MLIR/MPPA compilation",
+                )
+            else:
+                compile_program()
+            io_specs_args = {}
+            if self._backend._graph is None:
+                # Pass backend defined inputs/outputs specs when not a Graph
+                io_specs_args.update(
+                    {
+                        "np_inputs_spec": self._backend.np_inputs_spec,
+                        "np_outputs_spec": self._backend.np_outputs_spec,
+                    }
+                )
+            return self._target.create_module(
+                Path(self.dump_file).name,
+                self._backend.payload_name,
+                f"{self.dump_file}.{get_shlib_extension()}",
+                "shlib",
+                bare_ptr=self._config.bare_ptr,
+                graph=self._backend._graph,
+                **io_specs_args,
+            )
+        finally:
+            if temp_dir is not None:
+                shutil.rmtree(temp_dir)
 
     def generate_program(self) -> RawMlirProgram:
         # xdsl_func input must be read only
@@ -225,13 +240,17 @@ class MlirProgramCompiler:
 
         save_temp(src_ir_dump_file, self._mlir_program.mlir_module)
 
+        mark_isolated_stage("MLIR transform insertion")
         self.mlir_insert_transform_pass()
         save_temp(mlir_btrn_dump_file, self._mlir_program.mlir_module)
 
+        mark_isolated_stage("MLIR/SDist transform application")
         self.mlir_apply_transform_pass()
         save_temp(mlir_atrn_dump_file, self._mlir_program.mlir_module)
 
+        mark_isolated_stage("MLIR tensor lowering")
         self.mlir_apply_tensor_lowering_pass()
         save_temp(mlir_tlwr_dump_file, self._mlir_program.mlir_module)
 
+        mark_isolated_stage(f"{self._target.name()} code generation")
         self._target.generate_code_for_target(self._mlir_program, dump_file=dump_file)
