@@ -99,7 +99,6 @@ class SDistComPredictorModel(itf.pred.PredictModel):
                 *self.cmd_sdist_simulator,
                 str(ir_path),
                 f"--machine-model={self._machine_description_path}",
-                "--double-buffering=false",
             ]
             if self._trace_path is not None:
                 cmd.append(f"--trace={self._trace_path}")
