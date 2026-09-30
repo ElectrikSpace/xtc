@@ -17,6 +17,8 @@ from xtc.utils.ext_tools import (
     system_libs,
     cc_bin,
 )
+from xtc.errors import XtcCompileError
+from xtc.utils.isolation import mark_isolated_stage
 
 from xtc.runtimes.accelerator.mppa import MppaConfig
 
@@ -35,6 +37,7 @@ from mlir.dialects import transform
 __all__ = ["MlirMppaTarget"]
 
 USE_SDIST_COM = True
+
 
 class MlirMppaTarget(MlirTarget):
     """Kalray MPPA Target
@@ -92,6 +95,7 @@ class MlirMppaTarget(MlirTarget):
 
         # Lower to MLIR with MPPA dialect
         save_temp(mlir_atrn_dump_file, mlir_program.mlir_module)
+        mark_isolated_stage("SDist to MPPA lowering")
         self._mlir_to_mppa_pass(
             mlir_program,
             save_temp=save_temp,
@@ -269,11 +273,13 @@ class MlirProgramToMlirMppaPass:
         passes.append("func.func(sdist-fuse-linalg-fill-ops)")
         passes.append("sdist-remove-intermediate-subview-ops")
         if USE_SDIST_COM:
-          passes.append("convert-sdist-to-sdist-com{enable-broadcast=true}")
-          passes.append("sdist-com-group-transfers")
-          passes.append("sdist-split-for-distributed")
-          passes.append("sdist-com-apply-double-buffering{split-outer-transfers=true}")
-          passes.append("sdist-com-tokenize-group-transfers")
+            passes.append("convert-sdist-to-sdist-com{enable-broadcast=true}")
+            passes.append("sdist-com-group-transfers")
+            passes.append("sdist-split-for-distributed")
+            passes.append(
+                "sdist-com-apply-double-buffering{split-outer-transfers=true}"
+            )
+            passes.append("sdist-com-tokenize-group-transfers")
         return self._with_canonicalize_cse(passes)
 
     def _hw_dependent_pipeline(self) -> list[str]:
@@ -335,7 +341,7 @@ class MlirMppaBackend:
     @property
     def cmd_kvx_cc(self):
         return [f"{self._csw_path}/bin/kvx-cos-clang"]
-        #return [f"{self._csw_path}/bin/kvx-cos-gcc"]
+        # return [f"{self._csw_path}/bin/kvx-cos-gcc"]
 
     @property
     def cmd_kvx_ld(self):
@@ -352,24 +358,43 @@ class MlirMppaBackend:
     def _execute_command(
         self,
         cmd: list[str],
+        stage: str,
         input_pipe: str | None = None,
         pipe_stdoutput: bool = True,
     ) -> subprocess.CompletedProcess:
+        mark_isolated_stage(stage)
         pretty_cmd = "| " if input_pipe else ""
         pretty_cmd += " ".join(cmd)
         if self._config.debug:
             print(f"> exec: {pretty_cmd}", file=sys.stderr)
 
-        if input_pipe and pipe_stdoutput:
+        try:
             result = subprocess.run(
-                cmd, input=input_pipe, stdout=subprocess.PIPE, text=True
+                cmd,
+                input=input_pipe,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-        elif input_pipe and not pipe_stdoutput:
-            result = subprocess.run(cmd, input=input_pipe, text=True)
-        elif not input_pipe and pipe_stdoutput:
-            result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
-        else:
-            result = subprocess.run(cmd, text=True)
+        except OSError as exc:
+            raise XtcCompileError(
+                "Could not start external tool",
+                stage=stage,
+                command=cmd,
+                diagnostic=str(exc),
+            ) from exc
+        if result.returncode != 0:
+            raise XtcCompileError(
+                "External tool failed",
+                stage=stage,
+                command=cmd,
+                returncode=result.returncode,
+                diagnostic=result.stderr or result.stdout,
+            )
+        if result.stderr:
+            sys.stderr.write(result.stderr)
+        if not pipe_stdoutput and result.stdout:
+            sys.stdout.write(result.stdout)
         return result
 
     def _lowering_pipeline(self) -> str:
@@ -387,9 +412,9 @@ class MlirMppaBackend:
         passes.append("canonicalize")
         passes.append("func.func(kvxcluster-lower-promoted-memory)")
         passes.append("canonicalize")
-        #passes.append(
+        # passes.append(
         #    "func.func(kvxcluster-optimize-dma-transfers{bundle=true pipeline=true split-pipeline-outer-dma=false})"
-        #)
+        # )
         passes.append("canonicalize")
         passes.append("func.func(affine-expand-index-ops-as-affine)")
         passes.append("func.func(kvxcluster-basic-static-allocation)")
@@ -402,7 +427,7 @@ class MlirMppaBackend:
         passes.append("func.func(kvxpe-launch)")
         passes.append("canonicalize")
         passes.append(
-            #"func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=true})"
+            # "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=true})"
             "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=false})"
         )
         passes.append("canonicalize")
@@ -453,8 +478,7 @@ class MlirMppaBackend:
             "-o",
             mlir_after_mppa_dump_file,
         ]
-        exe_process = self._execute_command(cmd=cmd)
-        assert exe_process.returncode == 0
+        self._execute_command(cmd=cmd, stage="MPPA lowering (mppa-opt)")
 
     def generate_c_host(
         self, mlir_after_mppa_dump_file: str, c_host_dump_file: str
@@ -465,8 +489,7 @@ class MlirMppaBackend:
             "-o",
             c_host_dump_file,
         ]
-        exe_process = self._execute_command(cmd=cmd)
-        assert exe_process.returncode == 0
+        self._execute_command(cmd=cmd, stage="Host C translation (mppa-translate)")
 
     def generate_c_accelerator(
         self, mlir_after_mppa_dump_file: str, c_accelerator_dump_file: str
@@ -477,8 +500,9 @@ class MlirMppaBackend:
             "-o",
             c_accelerator_dump_file,
         ]
-        exe_process = self._execute_command(cmd=cmd)
-        assert exe_process.returncode == 0
+        self._execute_command(
+            cmd=cmd, stage="Accelerator C translation (mppa-translate)"
+        )
 
     def compile_c_accelerator(
         self, c_accelerator_dump_file: str, obj_accelerator_dump_file: str
@@ -498,8 +522,7 @@ class MlirMppaBackend:
             "-o",
             obj_accelerator_dump_file,
         ]
-        exe_process = self._execute_command(cmd=cmd)
-        assert exe_process.returncode == 0
+        self._execute_command(cmd=cmd, stage="Accelerator C compilation")
 
     def link_kvx_library(
         self, obj_accelerator_dump_file: str, kvx_so_dump_file: str
@@ -523,8 +546,7 @@ class MlirMppaBackend:
             "-o",
             kvx_so_dump_file,
         ]
-        exe_process = self._execute_command(cmd=cmd)
-        assert exe_process.returncode == 0
+        self._execute_command(cmd=cmd, stage="Accelerator library linking")
         # Enable traces
         # cmd = self.cmd_kvx_trace_util + [
         #    "-s1",
@@ -534,9 +556,19 @@ class MlirMppaBackend:
         # ]
         # exe_process = self._execute_command(cmd=cmd)
         # assert exe_process.returncode == 0
-        os.system(
-            self.cmd_kvx_trace_util[0] + ' -s1 -t "kmt_kernel_0/.*" ' + kvx_so_dump_file
-        )
+        try:
+            self._execute_command(
+                cmd=self.cmd_kvx_trace_util
+                + ["-s1", "-t", "kmt_kernel_0/.*", kvx_so_dump_file],
+                stage="Accelerator trace instrumentation",
+            )
+        except XtcCompileError as exc:
+            if (
+                exc.returncode != 255
+                or "Unable to find __kvx_tracepoints section" not in exc.diagnostic
+            ):
+                raise
+            print(exc.diagnostic.strip(), file=sys.stderr)
         # os.system(self.cmd_kvx_trace_util[0] + " -d long " + kvx_so_dump_file)
 
     def compile_c_host(
@@ -562,8 +594,7 @@ class MlirMppaBackend:
             "-o",
             obj_host_dump_file,
         ]
-        exe_process = self._execute_command(cmd=cmd)
-        assert exe_process.returncode == 0
+        self._execute_command(cmd=cmd, stage="Host C compilation")
         # traces
         cmd = self.cmd_host_cc + [
             "-DMPPA_TRACE_ENABLE",  # FIXME put under an option
@@ -580,8 +611,7 @@ class MlirMppaBackend:
             "-o",
             obj_traces_dump_file,
         ]
-        exe_process = self._execute_command(cmd=cmd)
-        assert exe_process.returncode == 0
+        self._execute_command(cmd=cmd, stage="Host trace C compilation")
 
     def link_shared_library(
         self,
@@ -607,5 +637,4 @@ class MlirMppaBackend:
             "-L" + self._mlir_mppa_path + "/_mlir_libs",
             "-lmlir_c_runner_utils",
         ]
-        exe_process = self._execute_command(cmd=cmd)
-        assert exe_process.returncode == 0
+        self._execute_command(cmd=cmd, stage="Host library linking")

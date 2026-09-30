@@ -4,10 +4,10 @@
 #
 """Schedule-related exceptions."""
 
-import os
 import sys
 
 from typing_extensions import override
+from xtc.errors import colorize_error
 
 
 class ScheduleParseError(RuntimeError):
@@ -50,6 +50,4 @@ class ScheduleValidationError(RuntimeError):
             lines.append(f"  Dimension: {self.dimension}")
         lines.append(f"  Error: {super().__str__()}")
         message = "\n".join(lines)
-        if "NO_COLOR" in os.environ or not sys.stderr.isatty():
-            return message
-        return f"\033[38;5;208m{message}\033[0m"
+        return colorize_error(message, stream=sys.stderr)

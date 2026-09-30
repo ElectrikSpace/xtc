@@ -6,8 +6,6 @@ import ctypes
 import subprocess
 import logging
 import os
-import subprocess
-import ctypes
 import ctypes.util
 import sys
 from pathlib import Path
@@ -17,6 +15,12 @@ from typing_extensions import override
 from xtc.itf.runtime.accelerator import AcceleratorDevice
 from xtc.itf.comp.module import Module
 from xtc.utils.cfunc import CFunc, _str_list_to_c
+from xtc.errors import XtcCompileError
+from xtc.runtimes.types.dlpack import DLDevice, DLDataType
+from xtc.utils.ext_tools import cc_bin
+from .config import MppaConfig
+from xtc.utils.loader import LibLoader
+from xtc.runtimes.host.HostRuntime import HostRuntime
 
 __all__ = ["MppaDevice"]
 
@@ -24,14 +28,6 @@ logger = logging.getLogger(__name__)
 
 # Can be set to True for RUNTIME_DEBUG
 RUNTIME_DEBUG = False
-
-from xtc.runtimes.types.dlpack import DLDevice, DLDataType
-
-from xtc.utils.ext_tools import cc_bin
-
-from .config import MppaConfig
-from xtc.utils.loader import LibLoader
-from xtc.runtimes.host.HostRuntime import HostRuntime
 
 MAX_NB_LOADED_KERNELS = 10
 NB_CC = 5
@@ -51,22 +47,38 @@ def _execute_command(
     input_pipe: str | None = None,
     pipe_stdoutput: bool = True,
     debug: bool = False,
-) -> subprocess.CompletedProcess:
+    stage: str = "MPPA runtime build",
+) -> subprocess.CompletedProcess[str]:
     pretty_cmd = "| " if input_pipe else ""
     pretty_cmd += " ".join(cmd)
     if debug:
         print(f"> exec: {pretty_cmd}", file=sys.stderr)
 
-    if input_pipe and pipe_stdoutput:
+    try:
         result = subprocess.run(
-            cmd, input=input_pipe, stdout=subprocess.PIPE, text=True
+            cmd,
+            input=input_pipe,
+            stdout=subprocess.PIPE if pipe_stdoutput else None,
+            stderr=subprocess.PIPE,
+            text=True,
         )
-    elif input_pipe and not pipe_stdoutput:
-        result = subprocess.run(cmd, input=input_pipe, text=True)
-    elif not input_pipe and pipe_stdoutput:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
-    else:
-        result = subprocess.run(cmd, text=True)
+    except OSError as exc:
+        raise XtcCompileError(
+            "Unable to launch MPPA runtime tool",
+            stage=stage,
+            command=cmd,
+            diagnostic=str(exc),
+        ) from exc
+    if result.returncode != 0:
+        raise XtcCompileError(
+            "MPPA runtime tool failed",
+            stage=stage,
+            command=cmd,
+            returncode=result.returncode,
+            diagnostic=result.stderr or result.stdout or "",
+        )
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
     return result
 
 
@@ -83,7 +95,11 @@ def _compile_kvx_object(device: "MppaDevice", src_file: str, obj_file: str):
         "-o",
         obj_file,
     ]
-    return _execute_command(cmd=cmd, debug=device.config.mlir_config.debug)
+    return _execute_command(
+        cmd=cmd,
+        debug=device.config.mlir_config.debug,
+        stage="MPPA runtime accelerator object compilation",
+    )
 
 
 def _compile_host_object(
@@ -116,7 +132,11 @@ def _compile_host_object(
             obj_file,
         ]
     )
-    return _execute_command(cmd=cmd, debug=device.config.mlir_config.debug)
+    return _execute_command(
+        cmd=cmd,
+        debug=device.config.mlir_config.debug,
+        stage="MPPA runtime host object compilation",
+    )
 
 
 def _compile_runtime_lib(device: "MppaDevice") -> LibLoader:
@@ -152,16 +172,30 @@ def _compile_runtime_lib(device: "MppaDevice") -> LibLoader:
         "-o",
         device.config.work_dir + "/mppa_runtime_acc.so",
     ]
-    exe_process = _execute_command(
-        cmd=cmd_kvx_link, debug=device.config.mlir_config.debug
+    _execute_command(
+        cmd=cmd_kvx_link,
+        debug=device.config.mlir_config.debug,
+        stage="MPPA runtime accelerator linking",
     )
-    assert exe_process.returncode == 0
-    os.system(
-        device._csw_path
-        + '/bin/kvx-trace-util -s1 -t "kmt/.*" '
-        + device.config.work_dir
-        + "/mppa_runtime_acc.so"
-    )
+    try:
+        _execute_command(
+            cmd=[
+                f"{device._csw_path}/bin/kvx-trace-util",
+                "-s1",
+                "-t",
+                "kmt/.*",
+                device.config.work_dir + "/mppa_runtime_acc.so",
+            ],
+            debug=device.config.mlir_config.debug,
+            stage="MPPA runtime tracepoint insertion",
+        )
+    except XtcCompileError as exc:
+        if (
+            exc.returncode != 255
+            or "Unable to find __kvx_tracepoints section" not in exc.diagnostic
+        ):
+            raise
+        print(f"Warning: {exc.diagnostic.strip()}", file=sys.stderr)
     # os.system(device._csw_path + "/bin/kvx-trace-util -d long " + device.config.work_dir + "/mppa_runtime_acc.so")
 
     # Compile host objects
@@ -189,10 +223,11 @@ def _compile_runtime_lib(device: "MppaDevice") -> LibLoader:
     ]
     if has_pfm:
         cmd_host_link += ["-lpfm"]
-    exe_process = _execute_command(
-        cmd=cmd_host_link, debug=device.config.mlir_config.debug
+    _execute_command(
+        cmd=cmd_host_link,
+        debug=device.config.mlir_config.debug,
+        stage="MPPA runtime host linking",
     )
-    assert exe_process.returncode == 0
 
     return LibLoader(device.config.work_dir + "/mppa_runtime_host.so")
 

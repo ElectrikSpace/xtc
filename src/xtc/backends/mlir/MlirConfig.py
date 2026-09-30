@@ -26,6 +26,7 @@ class MlirConfig:
     print_lowered_ir: bool = False
     print_bufferization_ir: bool = False
     debug: bool = False
+    isolate_compile: bool = True
     color: bool = False
     concluding_passes: list[str] = field(default_factory=list)
     always_vectorize: bool = False
