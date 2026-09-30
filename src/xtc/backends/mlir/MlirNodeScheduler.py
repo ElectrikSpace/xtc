@@ -5,7 +5,7 @@
 from typing import Literal
 
 from typing_extensions import override
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pprint import pformat
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
 from .MlirLoopNames import make_loop_name, basename
@@ -46,6 +46,7 @@ class MlirNodeSchedule:
     distribution: dict[str, str]
     fused: list[tuple[str, int]]
     distributed_buffers: dict[str, list[dict]]
+    dim_sizes: dict[str, int] | None = field(default=None, repr=False)
 
     def index_of_dim(self, dim: str) -> int:
         return list(self.dims).index(dim)
@@ -80,7 +81,9 @@ class MlirNodeSchedule:
 
     @override
     def __str__(self):
-        return pformat(asdict(self))
+        data = asdict(self)
+        data.pop("dim_sizes")
+        return pformat(data)
 
 
 class MlirNodeScheduler:
@@ -90,11 +93,13 @@ class MlirNodeScheduler:
         node_ident: str,
         dims: list[str],
         loop_stamps: list[str] = [],
+        dim_sizes: dict[str, int] | None = None,
     ) -> None:
         self.node_name = node_name
         self.node_ident = node_ident
         self.loop_stamps = loop_stamps  # Specification of transformations
         self.dims = dims[:]
+        self.dim_sizes = dim_sizes.copy() if dim_sizes is not None else None
         self.splits: dict[str, dict[str, int]] = {}
         self.tiles: dict[str, dict[str, int]] = {k: {} for k in self.dims}
         self.permutation: dict[str, list[str]] = {}
@@ -122,6 +127,7 @@ class MlirNodeScheduler:
             node_name=self.node_name,
             node_ident=self.node_ident,
             dims=self.dims,
+            dim_sizes=self.dim_sizes,
             loop_stamps=self.loop_stamps,
             tiles=self.tiles,
             splits=self.splits,
@@ -154,6 +160,10 @@ class MlirNodeScheduler:
 
     def set_dims(self, dims: list[str]) -> None:
         assert len(dims) == len(self.dims)
+        if self.dim_sizes is not None:
+            self.dim_sizes = {
+                new: self.dim_sizes[old] for old, new in zip(self.dims, dims)
+            }
         self.dims = dims[:]
         self.tiles = {k: {} for k in self.dims}
 

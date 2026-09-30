@@ -72,6 +72,7 @@ class MlirScheduler(itf.schd.Scheduler):
                 node_ident=backend.op_id_attribute,
                 dims=list(backend.dims),
                 loop_stamps=backend.loop_stamps,
+                dim_sizes=backend.dim_sizes,
             )
 
     @property
@@ -130,6 +131,7 @@ class MlirScheduler(itf.schd.Scheduler):
 
     @override
     def tile(self, dim: str, tiles: dict[str, int], root: str = DEFAULT_ROOT) -> None:
+        """Record tiles; known problem extents bound their sizes at validation."""
         self._current_scheduler.tile(dim, tiles, root=root)
 
     @override

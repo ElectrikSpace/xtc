@@ -15,6 +15,7 @@ from .MlirNodeScheduler import MlirNodeSchedule
 def validate_node_schedule(schedule: MlirNodeSchedule) -> None:
     """Check independently extensible tile and interchange rules for one node."""
     _check_positive_tiles(schedule)
+    _check_tile_bounds(schedule)
     _check_interchanges(schedule)
 
 
@@ -24,6 +25,29 @@ def _check_positive_tiles(schedule: MlirNodeSchedule) -> None:
             if size <= 0:
                 raise ScheduleValidationError(
                     f"Tile {name} must have a positive size, got {size}.",
+                    node=schedule.node_name,
+                    root=parent_name(name),
+                    dimension=dim,
+                )
+
+
+def _check_tile_bounds(schedule: MlirNodeSchedule) -> None:
+    if schedule.dim_sizes is None:
+        return
+    for dim, tiles in schedule.tiles.items():
+        if not tiles:
+            continue
+        if dim not in schedule.dim_sizes:
+            raise ScheduleValidationError(
+                "Problem dimension extent is unavailable.",
+                node=schedule.node_name,
+                dimension=dim,
+            )
+        extent = schedule.dim_sizes[dim]
+        for name, size in tiles.items():
+            if size > extent:
+                raise ScheduleValidationError(
+                    f"Tile {name} ({size}) exceeds problem dimension {dim} ({extent}).",
                     node=schedule.node_name,
                     root=parent_name(name),
                     dimension=dim,

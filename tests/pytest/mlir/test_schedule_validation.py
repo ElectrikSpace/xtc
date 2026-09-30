@@ -15,9 +15,9 @@ from xtc.schedules import exceptions
 from xtc.schedules.exceptions import ScheduleValidationError
 
 
-def matmul_scheduler():
-    a = O.tensor((512, 512), "float32", name="A")
-    b = O.tensor((512, 512), "float32", name="B")
+def matmul_scheduler(i=512, j=512, k=512):
+    a = O.tensor((i, k), "float32", name="A")
+    b = O.tensor((k, j), "float32", name="B")
     with O.graph(name="matmul") as gb:
         O.matmul(a, b, name="C")
     impl = Backend(gb.graph)
@@ -55,6 +55,61 @@ def test_nonpositive_tile_size_is_rejected(size):
     _, sch = matmul_scheduler()
     sch.tile("j", {"j0": size})
     with pytest.raises(ScheduleValidationError, match=r"Tile \./j0.*positive size"):
+        sch.schedule()
+
+
+def test_invalid2_py_tiles_exceed_problem_dimensions():
+    _, sch = matmul_scheduler(128, 128, 128)
+    sch.tile("i", {"i0": 512, "i1": 512, "i2": 16})
+    sch.tile("j", {"j0": 1024, "j1": 128, "j2": 32})
+    sch.interchange(["j", "i", "j0", "i0", "i1", "j1", "i2", "j2", "k"])
+
+    with pytest.raises(
+        ScheduleValidationError,
+        match=r"Tile \./i0 \(512\) exceeds problem dimension i \(128\)",
+    ) as error:
+        sch.schedule()
+    assert "  Dimension: i" in str(error.value)
+
+    sch.tile("i", {"i0": 128, "i1": 128})
+    with pytest.raises(
+        ScheduleValidationError,
+        match=r"Tile \./j0 \(1024\) exceeds problem dimension j \(128\)",
+    ):
+        sch.schedule()
+
+
+def test_tile_equal_to_extent_is_valid_after_renaming_dims():
+    _, sch = matmul_scheduler(64, 128, 256)
+    sch.set_dims(["I", "J", "K"])
+    sch.tile("I", {"I0": 64})
+    sch.tile("J", {"J0": 128})
+    sch.tile("K", {"K0": 256})
+    assert sch.schedule().schedule_impl[-1].dim_sizes == {
+        "I": 64,
+        "J": 128,
+        "K": 256,
+    }
+
+    sch.tile("K", {"K0": 257})
+    with pytest.raises(
+        ScheduleValidationError,
+        match=r"Tile \./K0 \(257\) exceeds problem dimension K \(256\)",
+    ):
+        sch.schedule()
+
+
+def test_split_root_tile_cannot_exceed_full_dimension():
+    _, sch = matmul_scheduler(128, 128, 128)
+    sch.split("i", {"i_lo": 0, "i_hi": 64})
+    sch.tile("j", {"j0": 129}, root="./i_lo")
+    sch.interchange(["k", "i_lo", "i_hi"])
+    sch.interchange(["j", "j0"], root="./i_lo")
+    sch.interchange(["j"], root="./i_hi")
+    with pytest.raises(
+        ScheduleValidationError,
+        match=r"Tile \./i_lo/j0 \(129\) exceeds problem dimension j \(128\)",
+    ):
         sch.schedule()
 
 
@@ -146,6 +201,25 @@ def test_compile_revalidates_before_generating_ir(monkeypatch):
     compiler = impl.get_compiler()
     monkeypatch.setattr(compiler, "generate_program", fail_if_called)
     with pytest.raises(ScheduleValidationError, match="Inner tile"):
+        compiler.compile(sched)
+
+
+def test_compile_revalidates_problem_extents_before_generating_ir(monkeypatch):
+    impl, sch = matmul_scheduler(128, 128, 128)
+    sch.tile("i", {"i0": 128})
+    sched = sch.schedule()
+    sched.schedule_impl[-1].tiles["i"]["./i0"] = 512
+
+    compiler = impl.get_compiler()
+    monkeypatch.setattr(
+        compiler,
+        "generate_program",
+        lambda: pytest.fail("Invalid schedule reached IR generation"),
+    )
+    with pytest.raises(
+        ScheduleValidationError,
+        match=r"Tile \./i0 \(512\) exceeds problem dimension i \(128\)",
+    ):
         compiler.compile(sched)
 
 
