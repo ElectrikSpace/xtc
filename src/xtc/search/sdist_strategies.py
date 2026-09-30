@@ -12,13 +12,7 @@ import numpy as np
 
 from xtc.itf.graph import Graph
 from xtc.itf.schd import Scheduler
-from xtc.itf.schd.scheduler import DEFAULT_ROOT
 from xtc.itf.search import Sample, Strategy
-from xtc.schedules.descript import Descript
-from xtc.utils.math import (
-    factors_to_sizes,
-    factors_enumeration,
-)
 from xtc.utils.algorithms import (
     sample_uniques,
 )
@@ -214,76 +208,136 @@ class Strategy_SDist_Simple(SDistBaseStrategy):
 
     @override
     def _generate(self, sch: Scheduler, in_x: list[int]) -> None:
-        # TODO: ref above, only support matmult like
         assert len(self._constant_sizes()) == 3
         ic, jc, iv, jv = in_x[:4]
         axes_order = ["i", "j", "i1", "j1", "iv", "jv", "k"]
-        #axes_order = ["j", "i", "j1", "i1", "i2", "j2", "iv", "jv", "k"]
         vector_axes = ["iv", "jv", "k"]
-        parallel_axes = []
-        #if self._threads > 1:
-        #    parallel_axes.append("j")
         sch.define_memory_mesh(axes={"mx": 1})
         sch.define_processor_mesh(axes={"px": 1, "psx": 1})
-        print("TILE SIZES")
-        print(ic)
-        print(jc)
-        sch.tile("i", {"i1": 256})
-        sch.tile("j", {"j1": 256})
-        #sch.tile("i", {"i1": ic})
-        #sch.tile("j", {"j1": jc})
-        assert ic > 8
-        assert jc > 8
+        sch.tile("i", {"i1": ic})
+        sch.tile("j", {"j1": jc})
         sch.pack_at("i1", 1)
-        #sch.pack_at("k", 1, pad=True)
         sch.pack_at("j1", 0)
-        #sch.buffer_at("i1") FIXME bug with double buffering
-        #sch.pack_at("i", 0, pad=True)
-        #sch.tile("i", {"i1": iR * iL2, "i2": iR}, root=".")
-        #sch.tile("j", {"j1": jR * jL3, "j2": jR}, root=".")
-        #sch.tile("k", {"k1": kR1}, root=".")
-        sch.tile("i", {"iv": 8}, root=".")
-        sch.tile("j", {"jv": 8}, root=".")
+        sch.tile("i", {"iv": iv}, root=".")
+        sch.tile("j", {"jv": jv}, root=".")
         sch.interchange(axes_order, root=".")
         sch.distribute("j1", "psx")
-        #sch.parallelize(parallel_axes, root=".")
         sch.vectorize(vector_axes, root=".")
-        #sch.unroll(unroll_axes, root=".")
 
     @override
     def _independents(self) -> list[list[list[int]]]:
-        # TODO: ref above, only support matmult like
         assert len(self._constant_sizes()) == 3
-        i, j, k = self._constant_sizes().values()
-        tiles_i = factors_enumeration(i, 2)
-        tiles_j = factors_enumeration(j, 2)
-        tiles_k = factors_enumeration(k, 2)
-        boolean = [[0], [1]]
-        return [tiles_i, tiles_j, tiles_k, boolean, boolean]
+        i, j, _ = self._constant_sizes().values()
+        return [
+            [[tile] for tile in (16, 32, 64, 128, 256) if i % tile == 0],
+            [[tile] for tile in (16, 32, 64, 128, 256) if j % tile == 0],
+            [[8]],
+            [[8]],
+        ]
 
     @override
     def _filter(self, samples: Iterator[VecSample]) -> Iterator[VecSample]:
-        v_index = 3
-        indexes = [1, 3, 5]
-        samples = self._filter_unroll(indexes, v_index, samples, stat="filtered")
         return samples
 
     @override
     def _default_schedule(self, opt_level: int) -> list[int]:
-        # TODO: ref above, only support matmult like
         assert len(self._constant_sizes()) == 3
-        i, j, k = i, j, k = self._constant_sizes().values()
-        schedule = [1, 1, 1, 1, 1, 0, 0, 0]
-        if opt_level >= 3:
-            jtile = self._vec_size
-            itile = 2  # TODO: IPC?
-            ktile = 1
-            idiv = i >= itile and i % itile == 0
-            jdiv = j >= jtile and j % jtile == 0
-            kdiv = k >= ktile and k % ktile == 0
-            if idiv and jdiv and kdiv:
-                schedule = [1, itile, 1, jtile, ktile, 2, 1, 1]
-        return schedule
+        choices = self._independents()
+        if not choices[0] or not choices[1]:
+            raise ValueError("Simple SDist requires i and j divisible by 16")
+        return [choices[0][-1][0], choices[1][-1][0], 8, 8]
+
+
+class Strategy_SDist_Broadcast(SDistBaseStrategy):
+    """Five-cluster matmul with both inputs packed at the broadcast tile."""
+
+    def __init__(self, graph: Graph, **kwargs: Any) -> None:
+        super().__init__(
+            graph, ["i0", "j0", "i1", "j1", "iu", "ju"], **kwargs
+        )
+        sizes = self._constant_sizes()
+        if len(sizes) != 3:
+            raise ValueError("Broadcast requires a three-dimensional matmul")
+        i, j, k = sizes.values()
+        if i < 32 or j < 32 or k < 8 or i % 32 or j % 32:
+            raise ValueError("Broadcast requires i and j divisible by 32 and k >= 8")
+
+    @override
+    def _generate(self, sch: Scheduler, in_x: list[int]) -> None:
+        choices = self._independents()
+        if (
+            len(in_x) != len(self.sample_names)
+            or any(
+                [value] not in options
+                for value, options in zip(in_x, choices)
+            )
+            or not any(self._filter(iter([in_x])))
+        ):
+            raise ValueError(f"invalid Broadcast sample: {in_x}")
+        i0, j0, i1, j1, iu, ju = in_x
+        sch.define_memory_mesh(axes={"mx": 5, "my": 1})
+        sch.define_processor_mesh(axes={"px": 5, "py": 1, "psx": 4, "psy": 4})
+        for dim, tiles in (
+            ("i", (("i0", i0), ("i1", i1), ("iu", iu), ("iv", 8))),
+            ("j", (("j0", j0), ("j1", j1), ("ju", ju), ("jv", 8))),
+        ):
+            for name, size in tiles:
+                sch.tile(dim, {name: size})
+        sch.interchange(
+            ["i", "j", "i0", "j0", "i1", "j1", "iu", "ju", "iv", "jv", "k"]
+        )
+        sch.pack_at("j0", 0)
+        sch.pack_at("j0", 1)
+        sch.distribute("i", "px")
+        sch.distribute("j", "py")
+        sch.distribute("i1", "psx")
+        sch.distribute("j1", "psy")
+        sch.vectorize(["iv", "jv", "k"])
+
+    @override
+    def _independents(self) -> list[list[list[int]]]:
+        i, j, _ = self._constant_sizes().values()
+
+        def tiles(size: int, choices: tuple[int, ...]) -> list[list[int]]:
+            return [[tile] for tile in choices if tile <= size and size % tile == 0]
+
+        return [
+            tiles(i, (32, 64, 128, 256)),
+            tiles(j, (32, 64, 128, 256)),
+            tiles(i, (32, 64, 128, 256)),
+            tiles(j, (32, 64, 128, 256)),
+            tiles(i, (8, 16, 32)),
+            tiles(j, (8, 16, 32)),
+        ]
+
+    @override
+    def _filter(self, samples: Iterator[VecSample]) -> Iterator[VecSample]:
+        self._stats["filtered"] = 0
+        for x in samples:
+            i0, j0, i1, j1, iu, ju = x
+            if (
+                i0 % i1 == j0 % j1 == i1 % iu == j1 % ju == iu % 8 == ju % 8 == 0
+                and i1 >= 4 * iu
+                and j1 >= 4 * ju
+            ):
+                self._stats["filtered"] += 1
+                yield x
+
+    @override
+    def _default_schedule(self, opt_level: int) -> list[int]:
+        i, j, _ = self._constant_sizes().values()
+
+        def largest_divisor(size: int, limit: int) -> int:
+            return max(tile for tile in (8, 16, 32, 64, 128, 256)
+                       if tile <= min(size, limit) and size % tile == 0)
+
+        i0 = largest_divisor(i, 128)
+        j0 = largest_divisor(j, 256)
+        return [
+            i0, j0, i0, j0,
+            largest_divisor(i0, min(32, i0 // 4)),
+            largest_divisor(j0, min(32, j0 // 4)),
+        ]
 
 
 #class Strategy_GOTO(BaseStrategy):
@@ -427,9 +481,10 @@ class SDistStrategies:
     @classmethod
     def create(cls, name: str, graph: Graph, *args: Any, **kwargs: Any) -> Strategy:
         registration = cls.registration(name)
-        all_args = {graph, *registration.default_args, *args}
+        all_args = (graph, *registration.default_args, *args)
         all_kwargs = {**registration.default_kwargs, **kwargs}
         return registration.cls(*all_args, **all_kwargs)
 
 
 SDistStrategies.register("simple", Strategy_SDist_Simple)
+SDistStrategies.register("broadcast", Strategy_SDist_Broadcast)
