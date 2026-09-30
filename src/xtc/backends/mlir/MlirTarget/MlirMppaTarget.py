@@ -269,7 +269,7 @@ class MlirProgramToMlirMppaPass:
         passes.append("func.func(sdist-fuse-linalg-fill-ops)")
         passes.append("sdist-remove-intermediate-subview-ops")
         if USE_SDIST_COM:
-          passes.append("convert-sdist-to-sdist-com")
+          passes.append("convert-sdist-to-sdist-com{enable-broadcast=true}")
           passes.append("sdist-com-group-transfers")
           passes.append("sdist-split-for-distributed")
           passes.append("sdist-com-apply-double-buffering{split-outer-transfers=true}")
@@ -402,7 +402,7 @@ class MlirMppaBackend:
         passes.append("func.func(kvxpe-launch)")
         passes.append("canonicalize")
         passes.append(
-            # "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=true})"
+            #"func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=true})"
             "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=false})"
         )
         passes.append("canonicalize")

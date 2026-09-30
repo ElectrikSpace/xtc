@@ -69,6 +69,9 @@ class MlirCompiler(itf.comp.Compiler):
         self,
         schedule: itf.schd.Schedule,
     ) -> itf.comp.Module:
+        """Compile a validated schedule, rejecting invalid ones before IR generation."""
+        mlir_schedule = cast(MlirSchedule, schedule)
+        mlir_schedule.validate()
         shared_lib = self._config.shared_lib
         executable = self._config.executable
         temp_dir = None
@@ -78,7 +81,7 @@ class MlirCompiler(itf.comp.Compiler):
         program = self.generate_program()
         compiler = MlirProgramCompiler(
             mlir_program=program,
-            mlir_schedule=cast(MlirSchedule, schedule),
+            mlir_schedule=mlir_schedule,
             concluding_passes=self._backend.concluding_passes,
             always_vectorize=self._backend.always_vectorize,
             config=self._config,

@@ -11,6 +11,7 @@ import xtc.backends.mlir as backend
 
 from .MlirNodeScheduler import MlirNodeScheduler, MlirNodeSchedule
 from .MlirLoopNames import basename
+from .MlirScheduleValidator import validate_node_schedule
 
 __all__ = [
     "MlirScheduler",
@@ -93,6 +94,11 @@ class MlirScheduler(itf.schd.Scheduler):
 
     @override
     def schedule(self) -> itf.schd.Schedule:
+        """Build and validate each MLIR node schedule.
+
+        Raises:
+            ScheduleValidationError: If a tile or interchange is invalid.
+        """
         from .MlirGraphBackend import MlirGraphBackend
         from .MlirNodeBackend import MlirNodeBackend
 
@@ -104,11 +110,13 @@ class MlirScheduler(itf.schd.Scheduler):
         else:
             assert isinstance(self._backend, MlirNodeBackend)
             nodes_schedules = [self._current_scheduler.mlir_node_schedule()]
-        return MlirSchedule(
+        result = MlirSchedule(
             scheduler=self,
             nodes_schedules=nodes_schedules,
             mlir_extensions=self.mlir_extensions,
         )
+        result.validate()
+        return result
 
     @override
     def set_dims(self, dims: list[str]) -> None:
@@ -276,6 +284,11 @@ class MlirSchedule(itf.schd.Schedule):
     @property
     def schedule_impl(self) -> list[MlirNodeSchedule]:
         return self._nodes_schedules
+
+    def validate(self) -> None:
+        """Validate all nodes before using this schedule for code generation."""
+        for node_schedule in self._nodes_schedules:
+            validate_node_schedule(node_schedule)
 
     @property
     @override
