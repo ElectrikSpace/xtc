@@ -1,5 +1,6 @@
 constraints:
   - ku <= 64
+  - mr <= 64
 schedule:
   j: parallelize
   $: pack(C)=pack_c

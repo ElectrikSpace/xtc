@@ -1,5 +1,6 @@
 constraints:
   - ku <= 64
+  - i3 <= 64
 schedule:
   i: parallelize
   j: parallelize
