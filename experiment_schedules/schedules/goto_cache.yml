@@ -5,6 +5,8 @@ constraints:
   - nr * kc <= max_l1_elts
   - mc * kc <= max_l2_elts
   - nc * kc <= max_l3_elts
+  - mr <= 64
+  - ku <= 64
 schedule:
   j: parallelize
   $: pack(C)=pack_c

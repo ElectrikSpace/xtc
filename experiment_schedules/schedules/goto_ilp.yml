@@ -7,6 +7,7 @@ constraints:
   - nvr * mr + nvr + 1 <= max_uk_vecs
   - ilp(nvr, mr, mc, nc, kc, RoB) >= opt_ilp
   - ku <= 64
+  - mr <= 64
 schedule:
   j: parallelize
   $: pack(C)=pack_c
