@@ -4,7 +4,7 @@
 #
 from typing_extensions import override
 from typing import Any
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import subprocess
 import os
 import sys
@@ -63,6 +63,8 @@ class MlirMppaTarget(MlirTarget):
     def generate_code_for_target(
         self,
         mlir_program: RawMlirProgram,  # Will be modified in place
+        *,
+        double_buffering: bool = True,
         **kwargs: Any,
     ) -> None:
         save_temp = self._save_temp
@@ -98,6 +100,7 @@ class MlirMppaTarget(MlirTarget):
         mark_isolated_stage("SDist to MPPA lowering")
         self._mlir_to_mppa_pass(
             mlir_program,
+            double_buffering=double_buffering,
             save_temp=save_temp,
             mlir_sdist_com_dump_file=mlir_sdist_com_dump_file,
         )
@@ -217,11 +220,13 @@ class MlirMppaTarget(MlirTarget):
         self,
         mlir_program: RawMlirProgram,
         *,
-        save_temp=None,
+        double_buffering: bool = True,
+        save_temp: Callable[[str, Any], None] | None = None,
         mlir_sdist_com_dump_file: str | None = None,
-    ):
+    ) -> None:
         to_mppa_pass = MlirProgramToMlirMppaPass(
             mlir_program=mlir_program,
+            double_buffering=double_buffering,
         )
         to_mppa_pass.run(
             save_temp=save_temp,
@@ -252,8 +257,11 @@ class MlirProgramToMlirMppaPass:
     def __init__(
         self,
         mlir_program: RawMlirProgram,
+        *,
+        double_buffering: bool = True,
     ) -> None:
         self._mlir_program = mlir_program
+        self._double_buffering = double_buffering
 
     def _with_canonicalize_cse(self, passes: list[str]) -> list[str]:
         new_passes = []
@@ -275,10 +283,11 @@ class MlirProgramToMlirMppaPass:
         if USE_SDIST_COM:
             passes.append("convert-sdist-to-sdist-com{enable-broadcast=true}")
             passes.append("sdist-com-group-transfers")
-            passes.append("sdist-split-for-distributed")
-            passes.append(
-                "sdist-com-apply-double-buffering{split-outer-transfers=true}"
-            )
+            if self._double_buffering:
+                passes.append("sdist-split-for-distributed")
+                passes.append(
+                    "sdist-com-apply-double-buffering{split-outer-transfers=true}"
+                )
             passes.append("sdist-com-tokenize-group-transfers")
         return self._with_canonicalize_cse(passes)
 
@@ -302,7 +311,7 @@ class MlirProgramToMlirMppaPass:
     def run(
         self,
         *,
-        save_temp=None,
+        save_temp: Callable[[str, Any], None] | None = None,
         mlir_sdist_com_dump_file: str | None = None,
     ) -> None:
         self._mlir_program.mlir_context.allow_unregistered_dialects = True
