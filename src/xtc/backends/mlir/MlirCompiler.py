@@ -70,8 +70,21 @@ class MlirCompiler(itf.comp.Compiler):
     def compile(
         self,
         schedule: itf.schd.Schedule,
+        *,
+        double_buffering: bool | None = None,
     ) -> itf.comp.Module:
-        """Compile a validated schedule, rejecting invalid ones before IR generation."""
+        """Compile a schedule, optionally selecting MPPA double buffering per call.
+
+        Double buffering is enabled by default on MPPA. Explicit booleans are
+        only supported on that target and do not affect subsequent calls.
+        """
+        if double_buffering is not None:
+            if not isinstance(double_buffering, bool):
+                raise TypeError("double_buffering must be a bool or None")
+            if self._target.name() != "mppa":
+                raise ValueError(
+                    "double_buffering is only supported on the MPPA target"
+                )
         mlir_schedule = cast(MlirSchedule, schedule)
         mlir_schedule.validate()
         shared_lib = self._config.shared_lib
@@ -94,7 +107,7 @@ class MlirCompiler(itf.comp.Compiler):
                 target=self._target,
                 dump_file=self.dump_file,
             )
-            compiler.compile()
+            compiler.compile(double_buffering=double_buffering)
 
         try:
             if self._target.name() == "mppa" and self._config.isolate_compile:
@@ -210,7 +223,7 @@ class MlirProgramCompiler:
             for extension, weak in self._mlir_schedule.mlir_extensions.items():
                 self._mlir_program.require_extension(extension, weak=weak)
 
-    def compile(self) -> None:
+    def compile(self, *, double_buffering: bool | None = None) -> None:
         save_temp = self._save_temp
         save_temps_dir = self._config.save_temps_dir
         dump_file = self.dump_file
@@ -253,4 +266,13 @@ class MlirProgramCompiler:
         save_temp(mlir_tlwr_dump_file, self._mlir_program.mlir_module)
 
         mark_isolated_stage(f"{self._target.name()} code generation")
-        self._target.generate_code_for_target(self._mlir_program, dump_file=dump_file)
+        if self._target.name() == "mppa":
+            self._target.generate_code_for_target(
+                self._mlir_program,
+                dump_file=dump_file,
+                double_buffering=True if double_buffering is None else double_buffering,
+            )
+        else:
+            self._target.generate_code_for_target(
+                self._mlir_program, dump_file=dump_file
+            )
