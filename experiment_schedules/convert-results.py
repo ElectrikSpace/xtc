@@ -4,7 +4,7 @@ import re
 import csv
 import json
 
-INPUT_R = re.compile(r"(.*)-(.*)\.yml-c(.)(-(.*))?\.csv")
+INPUT_R = re.compile(r"([^-]*)-(.*)\.yml-c(.)(-(.*))?\.csv")
 
 
 def main():
@@ -25,7 +25,6 @@ def main():
         os.mkdir(output)
 
     for f in os.listdir(input):
-        print(f)
         if f.endswith(".csv"):
             m = INPUT_R.match(f)
             if not m:
@@ -35,7 +34,11 @@ def main():
             op = op.lower()
             cores = int(cores)
             seed = int(seed) if seed else 1
-            out_f = f"{output}/results.c{cores}.{op}.{sched}.{batch}.2048.{seed}.jsonl"
+            with open(f"{input}/{f}", "rb") as f_in:
+                size = sum(1 for _ in f_in) - 1
+            out_f = (
+                f"{output}/results.c{cores}.{op}.{sched}.{batch}.{size}.{seed}.jsonl"
+            )
             with open(f"{input}/{f}", "r") as f_in, open(out_f, "w") as f_out:
                 data_in = csv.DictReader(f_in)
                 data_out = [{"results": [float(r["time"])]} for r in data_in]
