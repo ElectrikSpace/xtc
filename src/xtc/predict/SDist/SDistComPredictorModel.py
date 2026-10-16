@@ -67,7 +67,9 @@ class SDistComPredictorModel(itf.pred.PredictModel):
         if machine_description_path is None:
             raise ValueError("Machine description is required")
         self._machine_description_path = machine_description_path.resolve()
-        self._trace_path = Path(trace_path).resolve() if trace_path is not None else None
+        self._trace_path = (
+            Path(trace_path).resolve() if trace_path is not None else None
+        )
         self._efficiency_path = (
             Path(efficiency_path).resolve() if efficiency_path is not None else None
         )
@@ -91,10 +93,23 @@ class SDistComPredictorModel(itf.pred.PredictModel):
         )
 
     @override
-    def predict(self, schedule: "itf.schd.Schedule") -> float:
+    def predict(
+        self, schedule: "itf.schd.Schedule", *, double_buffering: bool = True
+    ) -> float:
+        """Predict elapsed cycles, optionally disabling transfer double buffering.
+
+        Double buffering is enabled by default, as in MPPA compilation. The
+        selection applies only to this call, including when reusing a model.
+        """
+        if not isinstance(double_buffering, bool):
+            raise TypeError("double_buffering must be a bool")
         with tempfile.TemporaryDirectory(prefix="sdist-predict-") as temp_dir:
             ir_path = Path(temp_dir) / "sdist_com.mlir"
-            self._run_sdist_pipeline(cast(MlirSchedule, schedule), str(ir_path))
+            self._run_sdist_pipeline(
+                cast(MlirSchedule, schedule),
+                str(ir_path),
+                double_buffering=double_buffering,
+            )
             cmd = [
                 *self.cmd_sdist_simulator,
                 str(ir_path),
@@ -126,7 +141,13 @@ class SDistComPredictorModel(itf.pred.PredictModel):
             self._pristine_module_source, context=self._mlir_program.mlir_context
         )
 
-    def _run_sdist_pipeline(self, schedule: MlirSchedule, sdist_com_dump_file: str) -> None:
+    def _run_sdist_pipeline(
+        self,
+        schedule: MlirSchedule,
+        sdist_com_dump_file: str,
+        *,
+        double_buffering: bool,
+    ) -> None:
         self._reset_mlir_program()
         self._compiler._mlir_schedule = schedule
 
@@ -134,7 +155,7 @@ class SDistComPredictorModel(itf.pred.PredictModel):
         self._compiler.mlir_apply_transform_pass()
         self._compiler.mlir_apply_tensor_lowering_pass()
 
-        self._run_sdist_lowering(self._mlir_program)
+        self._run_sdist_lowering(self._mlir_program, double_buffering=double_buffering)
 
         print(
             f"// -----// IR Dump After {_SDIST_PASSES[-1]} //----- //", file=sys.stderr
@@ -143,11 +164,18 @@ class SDistComPredictorModel(itf.pred.PredictModel):
         with open(sdist_com_dump_file, "w") as outf:
             outf.write(str(self._mlir_program.mlir_module))
 
-    def _run_sdist_lowering(self, mlir_program: MlirProgram) -> None:
+    def _run_sdist_lowering(
+        self, mlir_program: MlirProgram, *, double_buffering: bool
+    ) -> None:
         # Run the (local copy of the) sdist lowering pipeline defined above.
         assert "sdist" in mlir_program.mlir_extensions
         new_passes = []
         for p in _SDIST_PASSES:
+            if not double_buffering and p in (
+                "sdist-split-for-distributed",
+                "sdist-com-apply-double-buffering",
+            ):
+                continue
             new_passes.append(p)
             new_passes.append("canonicalize")
             new_passes.append("cse")
