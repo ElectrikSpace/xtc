@@ -44,6 +44,8 @@ class MlirMppaTarget(MlirTarget):
 
     This target implements the lowering and code generation to C
     for the Kalray MPPA architecture, using the Mlir-Mppa backend.
+    Intermediate files stay beside the output library and are removed after
+    successful compilation, unless save_temps retains them in save_temps_dir.
     """
 
     def __init__(self, config: MlirConfig):
@@ -89,9 +91,9 @@ class MlirMppaTarget(MlirTarget):
         mlir_amppa_dump_file = f"{dump_tmp_file}.after_mppa.mlir"
         c_host_dump_file = f"{dump_tmp_file}.host.c"
         c_accelerator_dump_file = f"{dump_tmp_file}.accelerator.c"
-        obj_host_dump_file = f"{dump_base}.host.o"
-        obj_accelerator_dump_file = f"{dump_base}.accelerator.o"
-        obj_traces_dump_file = f"{dump_base}.traces.o"
+        obj_host_dump_file = f"{dump_tmp_file}.host.o"
+        obj_accelerator_dump_file = f"{dump_tmp_file}.accelerator.o"
+        obj_traces_dump_file = f"{dump_tmp_file}.traces.o"
         so_dump_file = f"{dump_file}.{get_shlib_extension()}"
         kvx_so_dump_file = f"{dump_file}.kvx.so"
 
@@ -526,7 +528,7 @@ class MlirMppaBackend:
             "-fstack-limit-register=sr",
             "-DMPPA_TRACE_ENABLE",  # FIXME put under an option
             "-c",
-            "--save-temps",
+            *(["--save-temps=obj"] if self._config.save_temps else []),
             c_accelerator_dump_file,
             "-o",
             obj_accelerator_dump_file,
