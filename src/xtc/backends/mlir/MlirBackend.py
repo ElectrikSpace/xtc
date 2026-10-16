@@ -46,7 +46,7 @@ class MlirBackend(itf.back.Backend):
         return MlirScheduler(self, **kwargs)
 
     @override
-    def get_compiler(self, **kwargs: Any) -> itf.comp.Compiler:
+    def get_compiler(self, **kwargs: Any) -> MlirCompiler:
         return MlirCompiler(self, **kwargs)
 
     @abstractmethod
