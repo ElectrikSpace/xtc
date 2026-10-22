@@ -114,20 +114,7 @@ class MlirNodeScheduler:
         memory_axes: list[str],
         root: str = DEFAULT_ROOT,
     ):
-        assert self.memory_mesh, "Memory mesh has not been defined"
-        for ma in memory_axes:
-            assert ma in self.memory_mesh or ma == "*", (
-                "Memory axis not found in memory mesh"
-            )
-        axis_key = make_loop_name(root, axis)
-        if axis_key not in self.distributed_buffers.keys():
-            self.distributed_buffers[axis_key] = []
-        self.distributed_buffers[axis_key].append(
-            {
-                "input_idx": input_idx,
-                "memory_axes": memory_axes,
-            }
-        )
+        self._plain_sch.distributed_buffer_at(axis, input_idx, memory_axes, root)
 
     def fuse_producer_at(
         self, axis: str, input_idx: int, root: str = DEFAULT_ROOT

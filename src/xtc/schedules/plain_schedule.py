@@ -30,7 +30,7 @@ class PlainNodeSchedule:
     memory_mesh: dict[str, int]
     processor_mesh: dict[str, int]
     distribution: dict[str, str]
-    distributed_buffers: dict[str, dict]
+    distributed_buffers: dict[str, list[dict]]
     fused_producers: list[tuple[str, int]]
     fused_consumers: list[str]
     externals: dict[str, str]
@@ -114,7 +114,7 @@ class PlainNodeScheduler:
         self.memory_mesh: dict[str, int] = {}
         self.processor_mesh: dict[str, int] = {}
         self.distribution: dict[str, str] = {}
-        self.distributed_buffers: dict[str, dict] = {}
+        self.distributed_buffers: dict[str, list[dict]] = {}
         self.fused_producers: list[tuple[str, int]] = []
         self.fused_consumers: list[str] = []
         self.externals: dict[str, str] = {}
@@ -268,10 +268,12 @@ class PlainNodeScheduler:
                 "Memory axis not found in memory mesh"
             )
         dist_axis = make_loop_name(root, axis)
-        self.distributed_buffers[dist_axis] = {
-            "input_idx": input_idx,
-            "memory_axes": memory_axes,
-        }
+        self.distributed_buffers.setdefault(dist_axis, []).append(
+            {
+                "input_idx": input_idx,
+                "memory_axes": memory_axes,
+            }
+        )
 
     def fuse_producer_at(
         self, axis: str, input_idx: int, root: str = DEFAULT_ROOT

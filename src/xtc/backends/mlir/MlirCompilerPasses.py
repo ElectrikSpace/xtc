@@ -350,12 +350,6 @@ class MlirProgramInsertTransformPass:
             ):
                 loop_name = make_loop_name(root, axis_split)
             # Bufferization
-            if loop_name in schedule.distributed_buffers.keys():
-                self._distribute_buffers(
-                    loop_name=loop_name,
-                    schedule=schedule,
-                    sched_state=sched_state,
-                )
             if loop_name in schedule.packed_buffers.keys():
                 self._pack_buffer(
                     loop_name=loop_name,
@@ -373,6 +367,7 @@ class MlirProgramInsertTransformPass:
 
             # Manage the strip-mining
             if loop_name in schedule.vectorization:
+                self._distribute_buffers_if_any(loop_name, schedule, sched_state)
                 self._vectorize(sched_state, self._vector_sizes_for(schedule))
                 break
             elif loop_name in tiles_sizes_by_loops:
@@ -384,6 +379,10 @@ class MlirProgramInsertTransformPass:
                 )
                 if loop_name in schedule.distribution:
                     self._distribute_loop(loop_name, schedule, sched_state)
+                # Distributed buffers go inside the loop, after it is materialized
+                self._distribute_buffers_if_any(loop_name, schedule, sched_state)
+            else:
+                self._distribute_buffers_if_any(loop_name, schedule, sched_state)
             # Fuse the producers
             if producer_fuse_axes and loop_name in producer_fuse_axes:
                 self._fuse_producers_into_loop(
@@ -747,6 +746,15 @@ class MlirProgramInsertTransformPass:
         sched_state.handle = distribute_command.results[1]
         # Annotate the resulting loop if successfully generated
         transform.AnnotateOp(new_loop, loop_name)
+
+    def _distribute_buffers_if_any(
+        self,
+        loop_name: str,
+        schedule: MlirNodeSchedule,
+        sched_state: SchedulingState,
+    ):
+        if loop_name in schedule.distributed_buffers:
+            self._distribute_buffers(loop_name, schedule, sched_state)
 
     def _distribute_buffers(
         self,
