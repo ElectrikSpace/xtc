@@ -17,6 +17,7 @@ def validate_node_schedule(schedule: MlirNodeSchedule) -> None:
     _check_positive_tiles(schedule)
     _check_tile_bounds(schedule)
     _check_interchanges(schedule)
+    _check_buffers_outside_subprocessor_loops(schedule)
 
 
 def _check_positive_tiles(schedule: MlirNodeSchedule) -> None:
@@ -151,3 +152,42 @@ def _check_interchanges(schedule: MlirNodeSchedule) -> None:
                 )
 
     check_root(root, set(), {})
+
+
+def _check_buffers_outside_subprocessor_loops(schedule: MlirNodeSchedule) -> None:
+    """Reject buffers (sdist.read/write) nested in a subprocessor-distributed loop.
+
+    A processor axis beyond the memory mesh rank is a subprocessor axis.
+    """
+    if not schedule.distribution or not schedule.permutation:
+        return
+    proc_axes = list(schedule.processor_mesh)
+    memory_rank = len(schedule.memory_mesh)
+    buffered = (
+        set(schedule.packed_buffers)
+        | set(schedule.write_buffers)
+        | set(schedule.distributed_buffers)
+    )
+
+    def is_subprocessor(axis: str) -> bool:
+        proc_axis = schedule.distribution.get(axis)
+        if proc_axis is None or proc_axis not in proc_axes:
+            return False
+        return proc_axes.index(proc_axis) >= memory_rank
+
+    def check_root(loc_root: str, inside: str | None) -> None:
+        for axis in schedule.permutation.get(loc_root, []):
+            if axis in buffered and inside is not None:
+                raise ScheduleValidationError(
+                    f"Buffer at {axis} is nested in loop {inside} distributed on "
+                    f"subprocessor axis {schedule.distribution[inside]}; "
+                    "sdist.read/write are not allowed there.",
+                    node=schedule.node_name,
+                    root=loc_root,
+                )
+            if inside is None and is_subprocessor(axis):
+                inside = axis
+            if axis in schedule.permutation and axis != loc_root:
+                check_root(axis, inside)
+
+    check_root(next(iter(schedule.permutation)), None)
