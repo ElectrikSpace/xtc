@@ -157,10 +157,12 @@ class SDistComPredictorModel(itf.pred.PredictModel):
 
         self._run_sdist_lowering(self._mlir_program, double_buffering=double_buffering)
 
-        print(
-            f"// -----// IR Dump After {_SDIST_PASSES[-1]} //----- //", file=sys.stderr
-        )
-        print(str(self._mlir_program.mlir_module), file=sys.stderr)
+        if self._verbose:
+            print(
+                f"// -----// IR Dump After {_SDIST_PASSES[-1]} //----- //",
+                file=sys.stderr,
+            )
+            print(str(self._mlir_program.mlir_module), file=sys.stderr)
         with open(sdist_com_dump_file, "w") as outf:
             outf.write(str(self._mlir_program.mlir_module))
 
