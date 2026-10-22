@@ -297,7 +297,7 @@ class MlirProgramToMlirMppaPass:
         passes = []
         # HW dependant lowering
         if USE_SDIST_COM:
-            passes.append("convert-sdist-com-to-mppa")  # TODO handle reverse read
+            passes.append("convert-sdist-com-to-mppa{reverse-horizontal-loads=true}")
         else:
             passes.append("convert-sdist-to-mppa{reverse-reads=false}")
         passes.append("convert-sdist-utils-to-mppa")
@@ -352,7 +352,7 @@ class MlirMppaBackend:
     @property
     def cmd_kvx_cc(self):
         return [f"{self._csw_path}/bin/kvx-cos-clang"]
-        # return [f"{self._csw_path}/bin/kvx-cos-gcc"]
+        #return [f"{self._csw_path}/bin/kvx-cos-gcc"]
 
     @property
     def cmd_kvx_ld(self):
@@ -528,7 +528,7 @@ class MlirMppaBackend:
             "-fstack-limit-register=sr",
             "-DMPPA_TRACE_ENABLE",  # FIXME put under an option
             "-c",
-            *(["--save-temps=obj"] if self._config.save_temps else []),
+            #*(["--save-temps=obj"] if self._config.save_temps else []),
             c_accelerator_dump_file,
             "-o",
             obj_accelerator_dump_file,
