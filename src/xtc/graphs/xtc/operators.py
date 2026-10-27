@@ -216,7 +216,11 @@ class XTCOperMatmul(XTCOperator):
         a = a.reshape((a.shape[0], -1))
         b = b.reshape((-1, b.shape[-1]))
         # Note, use np.dot instead of np.matmul which may be buggy on Mac accelerators
-        out = np.dot(a, b).astype(np_acc)
+        # numpy has no BLAS path for float16 (very slow): accumulate in float32
+        if np_acc == np.float16:
+            out = np.dot(a.astype(np.float32), b.astype(np.float32)).astype(np_acc)
+        else:
+            out = np.dot(a, b).astype(np_acc)
         matmul = XTCTensor(out)
         matmul._type = XTCTensorType(
             shape=out.shape,
