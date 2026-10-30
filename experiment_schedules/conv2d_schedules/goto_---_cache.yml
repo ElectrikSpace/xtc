@@ -1,0 +1,29 @@
+constraints:
+  - cu <= 64
+  - br <= 64
+  - max_l1_elts := 8192
+  - max_l2_elts := 262144
+  - max_l3_elts := 9437184
+  - footprint(B, L1) <= max_l1_elts
+  - footprint(A, L2) <= max_l2_elts
+  - footprint(B, L3) <= max_l3_elts
+schedule:
+  f: parallelize
+  $: pack(C)=pack_c
+  c:
+  w:
+  h:
+  b:
+  $ L3:
+  f#fc:
+  $ L2:
+  w#wc:
+  h#hc:
+  b#bc:
+  $ L1:
+  r:
+  s:
+  c#cc: unroll=cu
+  $ Register:
+  b#br: unroll
+  f#fr: vectorize

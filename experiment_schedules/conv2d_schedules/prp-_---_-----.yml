@@ -1,0 +1,12 @@
+constraints:
+  - cu <= 64
+  - br <= 64
+schedule:
+  - P: parallelize
+  - P:
+  - $: pack(C)=pack_c
+  - R:
+  - P:
+  - c#cc: unroll=cu
+  - b#br: unroll
+  - f#fr: vectorize
