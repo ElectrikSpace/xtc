@@ -341,7 +341,7 @@ class MlirProgramToMlirMppaPass:
         passes = []
         # HW dependant lowering
         if USE_SDIST_COM:
-            passes.append("convert-sdist-com-to-mppa{reverse-horizontal-loads=true}")
+            passes.append("convert-sdist-com-to-mppa{reverse-horizontal-loads=false no-horizontal-noc=false balance-transfers-in-groups=false}")
         else:
             passes.append("convert-sdist-to-mppa{reverse-reads=false}")
         passes.append("convert-sdist-utils-to-mppa")
