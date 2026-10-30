@@ -433,6 +433,30 @@ class TVMScheduler(itf.schd.Scheduler):
         return LoopNestBuilder.from_plain_node_schedule(self._get_plain_schedule())
 
     @override
+    def read_rotate_at(
+        self,
+        loop: str,
+        input_idx: int,
+        axis: str,
+        root: str = DEFAULT_ROOT,
+    ) -> None:
+        # TODO: not implemented for now
+        pass
+
+    def _get_plain_schedule(self) -> TVMPlainSchedule:
+        return TVMPlainSchedule(
+            dims=deepcopy(self.dims),
+            tiles=self.tiles,
+            permutation=self.permutation,
+            parallelization=deepcopy(self.parallelization),
+            unrolling=self.unrolling,
+            vectorization=self.vectorization,
+            write_caches=deepcopy(self.write_caches),
+            read_buffers=deepcopy(self.read_buffers),
+            fused=deepcopy(self.fused),
+        )
+
+    @override
     def __str__(self) -> str:
         return str(self._get_plain_schedule())
 

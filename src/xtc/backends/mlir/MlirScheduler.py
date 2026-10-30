@@ -232,6 +232,17 @@ class MlirScheduler(itf.schd.Scheduler):
         )
 
     @override
+    def read_rotate_at(
+        self,
+        loop: str,
+        input_idx: int,
+        axis: str,
+        root: str = DEFAULT_ROOT,
+    ) -> None:
+        self._require_extension("sdist")
+        self._current_scheduler.read_rotate_at(loop, input_idx, axis, root=root)
+
+    @override
     def get_loop_nest(self) -> LoopNest:
         node_schedule = self._current_scheduler.get_node_schedule()
         return LoopNestBuilder.from_plain_node_schedule(node_schedule)

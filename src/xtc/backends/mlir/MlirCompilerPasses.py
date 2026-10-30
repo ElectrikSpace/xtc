@@ -358,6 +358,12 @@ class MlirProgramInsertTransformPass:
                     root=root,
                     tiles_sizes_by_loops=tiles_sizes_by_loops,
                 )
+            if loop_name in schedule.read_rotates:
+                self._read_rotate(
+                    loop_name=loop_name,
+                    schedule=schedule,
+                    sched_state=sched_state,
+                )
             if loop_name in schedule.write_buffers:
                 self._write_buffer(
                     loop_name=loop_name,
@@ -801,6 +807,35 @@ class MlirProgramInsertTransformPass:
                     target=sched_state.handle,
                     input_idx=input_idx,
                 )
+
+    def _read_rotate(
+        self,
+        loop_name: str,
+        schedule: MlirNodeSchedule,
+        sched_state: SchedulingState,
+    ):
+        assert sdist_transform is not None
+        with InsertionPoint(transform.ApplyPatternsOp(sched_state.handle).patterns):
+            memref.ApplyFoldMemrefAliasOpsPatternsOp()
+        entries = schedule.read_rotates[loop_name]
+        # The read_rotate must be directly nested in a systolic loop on its axis:
+        # turn the surrounding (innermost materialized) loop into one.
+        assert sched_state.all_loops, "read_rotate_at requires a surrounding loop"
+        surrounding_name, surrounding_loop = list(sched_state.all_loops.items())[-1]
+        systolic = sdist_transform.SDistSystolicLoopOp(
+            target=surrounding_loop,
+            mesh="memory_mesh",
+            axis=entries[0]["axis"],
+        )
+        sched_state.all_loops[surrounding_name] = systolic.results[0]
+        sched_state.handle = systolic.results[1]
+        transform.AnnotateOp(systolic.results[0], surrounding_name)
+        for entry in entries:
+            sdist_transform.SDistReadRotateAtOp(
+                target=sched_state.handle,
+                input_idx=entry["input_idx"],
+                axis=entry["axis"],
+            )
 
     def _write_buffer(
         self,

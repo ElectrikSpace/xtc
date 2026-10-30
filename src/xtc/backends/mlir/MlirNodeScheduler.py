@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+from copy import deepcopy
 from typing import Literal
 
 from typing_extensions import override
@@ -30,6 +31,7 @@ def basename(loop_name: str) -> str:
 @dataclass(frozen=True)
 class MlirNodeSchedule(PlainNodeSchedule):
     dim_sizes: dict[str, int] | None = field(default=None, repr=False)
+    read_rotates: dict[str, list[dict]] = field(default_factory=dict, repr=False)
 
 
 class MlirNodeScheduler:
@@ -47,6 +49,7 @@ class MlirNodeScheduler:
             dims,
         )
         self._dim_sizes = dim_sizes
+        self._read_rotates: dict[str, list[dict]] = {}
 
     @property
     def node_name(self) -> str:
@@ -116,6 +119,31 @@ class MlirNodeScheduler:
     ):
         self._plain_sch.distributed_buffer_at(axis, input_idx, memory_axes, root)
 
+    def read_rotate_at(
+        self,
+        loop: str,
+        input_idx: int,
+        axis: str,
+        root: str = DEFAULT_ROOT,
+    ):
+        memory_mesh = self._plain_sch.memory_mesh
+        assert memory_mesh, "Memory mesh has not been defined"
+        assert axis in memory_mesh, "Memory axis not found in memory mesh"
+        dist_axes = [
+            dist["memory_axes"]
+            for dists in self._plain_sch.distributed_buffers.values()
+            for dist in dists
+            if dist["input_idx"] == input_idx
+        ]
+        assert dist_axes, "read_rotate_at requires a distributed input buffer"
+        assert any(axis in axes for axes in dist_axes), (
+            "Input buffer is not distributed on the rotation axis"
+        )
+        axis_key = make_loop_name(root, loop)
+        self._read_rotates.setdefault(axis_key, []).append(
+            {"input_idx": input_idx, "axis": axis}
+        )
+
     def fuse_producer_at(
         self, axis: str, input_idx: int, root: str = DEFAULT_ROOT
     ) -> None:
@@ -126,8 +154,9 @@ class MlirNodeScheduler:
 
     def get_node_schedule(self) -> MlirNodeSchedule:
         plain_schedule = self._plain_sch.get_plain_schedule()
-        return MlirNodeSchedule(
-            **asdict(plain_schedule), dim_sizes=self._dim_sizes
+        return MlirNodeSchedule(**asdict(plain_schedule), 
+            dim_sizes=self._dim_sizes,
+            read_rotates=deepcopy(self._read_rotates),
         )
 
     @override
