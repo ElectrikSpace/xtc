@@ -9,7 +9,7 @@ __all__: list[str] = []
 
 
 def _register_conv2d_ops():
-    for group in [squeezenet_convs, alexnet_convs]:
+    for group in [squeezenet_convs, alexnet_convs, resnet_convs]:
         for name, params in group.items():
             register_operation(
                 "conv2d",
