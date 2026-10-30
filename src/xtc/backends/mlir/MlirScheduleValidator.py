@@ -167,6 +167,7 @@ def _check_buffers_outside_subprocessor_loops(schedule: MlirNodeSchedule) -> Non
         set(schedule.packed_buffers)
         | set(schedule.write_buffers)
         | set(schedule.distributed_buffers)
+        | set(schedule.read_rotates)
     )
 
     def is_subprocessor(axis: str) -> bool:
