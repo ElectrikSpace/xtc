@@ -495,6 +495,17 @@ class TVMScheduler(itf.schd.Scheduler):
         # TODO: not implemented for now
         pass
 
+    @override
+    def read_rotate_at(
+        self,
+        loop: str,
+        input_idx: int,
+        axis: str,
+        root: str = DEFAULT_ROOT,
+    ) -> None:
+        # TODO: not implemented for now
+        pass
+
     def _get_plain_schedule(self) -> TVMPlainSchedule:
         return TVMPlainSchedule(
             dims=deepcopy(self.dims),

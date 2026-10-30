@@ -335,6 +335,7 @@ class MlirProgramToMlirMppaPass:
                     "sdist-com-apply-double-buffering{split-outer-transfers=true}"
                 )
             passes.append("sdist-com-tokenize-group-transfers")
+            passes.append("sdist-lower-read-rotate")
         return self._with_canonicalize_cse(passes)
 
     def _hw_dependent_pipeline(self) -> list[str]:
@@ -395,8 +396,8 @@ class MlirMppaBackend:
 
     @property
     def cmd_kvx_cc(self):
-        return [f"{self._csw_path}/bin/kvx-cos-clang"]
-        #return [f"{self._csw_path}/bin/kvx-cos-gcc"]
+        #return [f"{self._csw_path}/bin/kvx-cos-clang"]
+        return [f"{self._csw_path}/bin/kvx-cos-gcc"]
 
     @property
     def cmd_kvx_ld(self):
@@ -482,7 +483,7 @@ class MlirMppaBackend:
         passes.append("func.func(kvxpe-launch)")
         passes.append("canonicalize")
         passes.append(
-            # "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=true})"
+            #"func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=true})"
             "func.func(kvxuks-catch{request-attribute=xtc.request_vectorization use-fake-kernels=false})"
         )
         passes.append("canonicalize")

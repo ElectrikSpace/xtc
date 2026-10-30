@@ -291,6 +291,31 @@ class Scheduler(ABC):
         ...
 
     @abstractmethod
+    def read_rotate_at(
+        self,
+        loop: str,
+        input_idx: int,
+        axis: str,
+        root: str = DEFAULT_ROOT,
+    ) -> None:
+        """Read the local block of a distributed buffer and rotate it on a mesh axis.
+
+        The given input buffer must be a distributed buffer. At the specified
+        loop level, the computation reads the block of the buffer owned by the
+        local node into a new local buffer, while the block it owns is sent to
+        the node I+1 (ring) along the memory mesh axis `axis`. The loop
+        surrounding the read must be sequential and have as many iterations
+        as the size of the memory mesh axis.
+
+        Args:
+            loop: the loop level where the read and rotation is created
+            input_idx: input buffer index for the scheduled computation
+            axis: the memory mesh axis along which blocks are rotated
+            root: the parent split (or the operator's absolute root)
+        """
+        ...
+
+    @abstractmethod
     def get_loop_nest(self) -> LoopNest:
         """Return a LoopNest representation of the current schedule.
 

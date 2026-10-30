@@ -47,6 +47,7 @@ class MlirNodeSchedule:
     fused: list[tuple[str, int]]
     distributed_buffers: dict[str, list[dict]]
     dim_sizes: dict[str, int] | None = field(default=None, repr=False)
+    read_rotates: dict[str, list[dict]] = field(default_factory=dict)
 
     def index_of_dim(self, dim: str) -> int:
         return list(self.dims).index(dim)
@@ -113,6 +114,7 @@ class MlirNodeScheduler:
         self.distribution: dict[str, str] = {}
         self.fused: list[tuple[str, int]] = []
         self.distributed_buffers: dict[str, list[dict]] = {}
+        self.read_rotates: dict[str, list[dict]] = {}
 
     def mlir_node_schedule(self) -> MlirNodeSchedule:
         if not self.permutation:
@@ -141,6 +143,7 @@ class MlirNodeScheduler:
             processor_mesh=self.processor_mesh,
             distribution=self.distribution,
             distributed_buffers=self.distributed_buffers,
+            read_rotates=self.read_rotates,
             fused=self.fused,
         )
 
@@ -260,6 +263,30 @@ class MlirNodeScheduler:
                 "input_idx": input_idx,
                 "memory_axes": memory_axes,
             }
+        )
+
+    def read_rotate_at(
+        self,
+        loop: str,
+        input_idx: int,
+        axis: str,
+        root: str = DEFAULT_ROOT,
+    ):
+        assert self.memory_mesh, "Memory mesh has not been defined"
+        assert axis in self.memory_mesh, "Memory axis not found in memory mesh"
+        dist_axes = [
+            dist["memory_axes"]
+            for dists in self.distributed_buffers.values()
+            for dist in dists
+            if dist["input_idx"] == input_idx
+        ]
+        assert dist_axes, "read_rotate_at requires a distributed input buffer"
+        assert any(axis in axes for axes in dist_axes), (
+            "Input buffer is not distributed on the rotation axis"
+        )
+        axis_key = make_loop_name(root, loop)
+        self.read_rotates.setdefault(axis_key, []).append(
+            {"input_idx": input_idx, "axis": axis}
         )
 
     def fuse_producer_at(

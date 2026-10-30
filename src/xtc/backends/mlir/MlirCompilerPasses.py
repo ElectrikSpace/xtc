@@ -350,6 +350,12 @@ class MlirProgramInsertTransformPass:
                     root=root,
                     tiles_sizes_by_loops=tiles_sizes_by_loops,
                 )
+            if loop_name in schedule.read_rotates:
+                self._read_rotate(
+                    loop_name=loop_name,
+                    schedule=schedule,
+                    sched_state=sched_state,
+                )
             if loop_name in schedule.write_buffers:
                 self._write_buffer(
                     loop_name=loop_name,
@@ -723,6 +729,22 @@ class MlirProgramInsertTransformPass:
                     target=sched_state.handle,
                     input_idx=input_idx,
                 )
+
+    def _read_rotate(
+        self,
+        loop_name: str,
+        schedule: MlirNodeSchedule,
+        sched_state: SchedulingState,
+    ):
+        assert sdist_transform is not None
+        with InsertionPoint(transform.ApplyPatternsOp(sched_state.handle).patterns):
+            memref.ApplyFoldMemrefAliasOpsPatternsOp()
+        for entry in schedule.read_rotates[loop_name]:
+            sdist_transform.SDistReadRotateAtOp(
+                target=sched_state.handle,
+                input_idx=entry["input_idx"],
+                axis=entry["axis"],
+            )
 
     def _write_buffer(
         self,
