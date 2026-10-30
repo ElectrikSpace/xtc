@@ -97,37 +97,29 @@ class MlirMppaTarget(MlirTarget):
         so_dump_file = f"{dump_file}.{get_shlib_extension()}"
         kvx_so_dump_file = f"{dump_file}.kvx.so"
 
-        # Lower to MLIR with MPPA dialect
-        save_temp(mlir_atrn_dump_file, mlir_program.mlir_module)
-        mark_isolated_stage("SDist to MPPA lowering")
-        self._mlir_to_mppa_pass(
-            mlir_program,
-            double_buffering=double_buffering,
-            save_temp=save_temp,
-            mlir_sdist_com_dump_file=mlir_sdist_com_dump_file,
-        )
-
-        # Run MLIR MPPA backend
-        with open(mlir_bmppa_dump_file, "w") as outf:
-            outf.write(str(mlir_program.mlir_module))
-        self._mlir_mppa_backend.run_lowering(
-            mlir_before_mppa_dump_file=mlir_bmppa_dump_file,
-            mlir_after_mppa_dump_file=mlir_amppa_dump_file,
-        )
-        if self._config.print_lowered_ir:
-            print(f"// -----// IR Dump After MPPA Opt //----- //", file=sys.stderr)
-            with open(mlir_amppa_dump_file, "r") as inf:
-                print(inf.read(), file=sys.stderr)
-
-        # Generate C code for host and accelerator
-        self._mlir_mppa_backend.generate_c_host(
-            mlir_after_mppa_dump_file=mlir_amppa_dump_file,
-            c_host_dump_file=c_host_dump_file,
-        )
-        self._mlir_mppa_backend.generate_c_accelerator(
-            mlir_after_mppa_dump_file=mlir_amppa_dump_file,
-            c_accelerator_dump_file=c_accelerator_dump_file,
-        )
+        host_c = self._config.mppa_host_c_file
+        accel_c = self._config.mppa_accelerator_c_file
+        if (host_c is None) != (accel_c is None):
+            raise ValueError(
+                "mppa_host_c_file and mppa_accelerator_c_file must be given together"
+            )
+        external_c = host_c is not None and accel_c is not None
+        if external_c:
+            assert host_c is not None and accel_c is not None
+            c_host_dump_file = host_c
+            c_accelerator_dump_file = accel_c
+        else:
+            self._generate_c(
+                mlir_program,
+                double_buffering=double_buffering,
+                save_temp=save_temp,
+                mlir_atrn_dump_file=mlir_atrn_dump_file,
+                mlir_sdist_com_dump_file=mlir_sdist_com_dump_file,
+                mlir_bmppa_dump_file=mlir_bmppa_dump_file,
+                mlir_amppa_dump_file=mlir_amppa_dump_file,
+                c_host_dump_file=c_host_dump_file,
+                c_accelerator_dump_file=c_accelerator_dump_file,
+            )
 
         # Compile C code for accelerator
         self._mlir_mppa_backend.compile_c_accelerator(
@@ -158,13 +150,65 @@ class MlirMppaTarget(MlirTarget):
 
         # Remove intermediate files if needed
         if not self._config.save_temps:
-            os.remove(mlir_bmppa_dump_file)
-            os.remove(mlir_amppa_dump_file)
-            os.remove(c_host_dump_file)
-            os.remove(c_accelerator_dump_file)
+            if not external_c:
+                os.remove(mlir_bmppa_dump_file)
+                os.remove(mlir_amppa_dump_file)
+                os.remove(c_host_dump_file)
+                os.remove(c_accelerator_dump_file)
             os.remove(obj_host_dump_file)
             os.remove(obj_accelerator_dump_file)
             os.remove(obj_traces_dump_file)
+
+    def _generate_c(
+        self,
+        mlir_program: RawMlirProgram,
+        *,
+        double_buffering: bool,
+        save_temp: Any,
+        mlir_atrn_dump_file: str,
+        mlir_sdist_com_dump_file: str,
+        mlir_bmppa_dump_file: str,
+        mlir_amppa_dump_file: str,
+        c_host_dump_file: str,
+        c_accelerator_dump_file: str,
+    ) -> None:
+        # Lower to MLIR with MPPA dialect
+        save_temp(mlir_atrn_dump_file, mlir_program.mlir_module)
+        external_mlir = self._config.mppa_mlir_file
+        if external_mlir is None:
+            mark_isolated_stage("SDist to MPPA lowering")
+            self._mlir_to_mppa_pass(
+                mlir_program,
+                double_buffering=double_buffering,
+                save_temp=save_temp,
+                mlir_sdist_com_dump_file=mlir_sdist_com_dump_file,
+            )
+            mppa_ir = str(mlir_program.mlir_module)
+        else:
+            with open(external_mlir, "r") as inf:
+                mppa_ir = inf.read()
+
+        # Run MLIR MPPA backend
+        with open(mlir_bmppa_dump_file, "w") as outf:
+            outf.write(mppa_ir)
+        self._mlir_mppa_backend.run_lowering(
+            mlir_before_mppa_dump_file=mlir_bmppa_dump_file,
+            mlir_after_mppa_dump_file=mlir_amppa_dump_file,
+        )
+        if self._config.print_lowered_ir:
+            print(f"// -----// IR Dump After MPPA Opt //----- //", file=sys.stderr)
+            with open(mlir_amppa_dump_file, "r") as inf:
+                print(inf.read(), file=sys.stderr)
+
+        # Generate C code for host and accelerator
+        self._mlir_mppa_backend.generate_c_host(
+            mlir_after_mppa_dump_file=mlir_amppa_dump_file,
+            c_host_dump_file=c_host_dump_file,
+        )
+        self._mlir_mppa_backend.generate_c_accelerator(
+            mlir_after_mppa_dump_file=mlir_amppa_dump_file,
+            c_accelerator_dump_file=c_accelerator_dump_file,
+        )
 
     @override
     def create_module(

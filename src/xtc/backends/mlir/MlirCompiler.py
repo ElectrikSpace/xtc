@@ -253,6 +253,19 @@ class MlirProgramCompiler:
 
         save_temp(src_ir_dump_file, self._mlir_program.mlir_module)
 
+        if (
+            self._config.mppa_mlir_file is not None
+            or self._config.mppa_host_c_file is not None
+        ):
+            # External Mppa-dialect MLIR: skip the XTC/SDist lowering stages
+            mark_isolated_stage("mppa code generation")
+            self._target.generate_code_for_target(
+                self._mlir_program,
+                dump_file=dump_file,
+                double_buffering=True if double_buffering is None else double_buffering,
+            )
+            return
+
         mark_isolated_stage("MLIR transform insertion")
         self.mlir_insert_transform_pass()
         save_temp(mlir_btrn_dump_file, self._mlir_program.mlir_module)
