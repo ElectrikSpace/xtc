@@ -34,6 +34,13 @@ class MlirConfig:
     arch: str = "native"
     cpu: str = "native"
     selected_device: int | None = None
+    # Mppa target only: external MLIR file (Mppa dialects) used instead of the
+    # IR generated from the graph/schedule; skips the SDist -> Mppa lowering
+    mppa_mlir_file: str | None = None
+    # Mppa target only: external host and accelerator C files (both required),
+    # compiled as is instead of generating them; skips all the MLIR stages
+    mppa_host_c_file: str | None = None
+    mppa_accelerator_c_file: str | None = None
     required_extensions: list[str] = field(default_factory=list)
 
     def __post_init__(self):
