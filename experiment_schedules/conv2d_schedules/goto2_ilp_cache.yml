@@ -1,0 +1,35 @@
+constraints:
+  - cu <= 64
+  - bu <= 64
+  - max_l1_elts := 8192
+  - max_l2_elts := 262144
+  - max_l3_elts := 9437184
+  - footprint(B, L1) <= max_l1_elts
+  - footprint(A, L2) <= max_l2_elts
+  - footprint(B, L3) <= max_l3_elts
+  - RoB := 224
+  - v_elts := 16
+  - max_uk_vecs := 32
+  - opt_ilp := 8
+  - fr == fvr * v_elts
+  - fvr * br + fvr + 1 <= max_uk_vecs
+  - ilp(fvr, br, bc*wc*hc, fc, cc, RoB) >= opt_ilp
+schedule:
+  w: parallelize
+  h: parallelize
+  b: parallelize
+  f: parallelize
+  $ L3:
+  f#fc:
+  $ L2:
+  w#wc:
+  h#hc:
+  b#bc:
+  $ L1: pack(C)=pack_c
+  c:
+  r:
+  s:
+  c#cc: unroll=cu
+  $ Register:
+  b#br: unroll=bu
+  f#fr: vectorize
