@@ -327,6 +327,7 @@ class MlirProgramToMlirMppaPass:
         passes.append("func.func(sdist-fuse-linalg-fill-ops)")
         passes.append("sdist-remove-intermediate-subview-ops")
         if USE_SDIST_COM:
+            passes.append("sdist-lower-systolic-loops")
             passes.append("convert-sdist-to-sdist-com{enable-broadcast=true}")
             passes.append("sdist-com-group-transfers")
             if self._double_buffering:
@@ -335,7 +336,6 @@ class MlirProgramToMlirMppaPass:
                     "sdist-com-apply-double-buffering{split-outer-transfers=true}"
                 )
             passes.append("sdist-com-tokenize-group-transfers")
-            passes.append("sdist-lower-read-rotate")
         return self._with_canonicalize_cse(passes)
 
     def _hw_dependent_pipeline(self) -> list[str]:
@@ -489,6 +489,7 @@ class MlirMppaBackend:
         passes.append("canonicalize")
         passes.append("convert-linalg-to-loops")
         passes.append("canonicalize")
+        passes.append("func.func(kvxcluster-memcpy-on-spare-pes)")
         # passes.append("func.func(affine-super-vectorize)")
         passes.append("func.func(lower-affine)")
         passes.append("canonicalize")
