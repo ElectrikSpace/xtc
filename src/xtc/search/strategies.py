@@ -1139,14 +1139,11 @@ try:
             if not self._constraints:
                 self._initialized = True
                 return
-            max_enum = int(1 + np.log2(max(self._sizes.values())))
             context = Context(functions=self._functions)
             constraints, self.constants = constraints_from_str(
                 list(self._constraints), context=context
             )
-            properties, constraints = hypergraph(
-                constraints, max_enum=max_enum, context=context
-            )
+            properties, constraints = hypergraph(constraints, context=context)
             methods = solve_with_z3(list(context.variables), properties, constraints)
             enumerations = execute_static(methods, properties, constraints)
             self._context = context
