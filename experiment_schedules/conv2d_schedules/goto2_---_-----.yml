@@ -1,0 +1,22 @@
+constraints:
+  - cu <= 64
+  - bu <= 64
+schedule:
+  w: parallelize
+  h: parallelize
+  b: parallelize
+  f: parallelize
+  $ L3:
+  f#fc:
+  $ L2:
+  w#wc:
+  h#hc:
+  b#bc:
+  $ L1: pack(C)=pack_c
+  c:
+  r:
+  s:
+  c#cc: unroll=cu
+  $ Register:
+  b#br: unroll=bu
+  f#fr: vectorize
