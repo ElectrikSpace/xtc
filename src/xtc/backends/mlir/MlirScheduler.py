@@ -75,6 +75,7 @@ class MlirScheduler(itf.schd.Scheduler):
                 dims=list(backend.dims),
                 loop_stamps=backend.loop_stamps,
                 dim_sizes=backend.dim_sizes,
+                reduction_dims=backend.reduction_dims,
             )
 
     @property

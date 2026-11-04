@@ -141,9 +141,7 @@ def test_interchange_must_use_tile_from_its_own_root():
     assert sch.schedule()
 
     sch.interchange(["j", "j0", "j1"], root="./i_hi")
-    with pytest.raises(
-        ScheduleValidationError, match=r"unknown axes \['\./i_hi/j1'\]"
-    ):
+    with pytest.raises(ScheduleValidationError, match=r"unknown axes \['\./i_hi/j1'\]"):
         sch.schedule()
 
 
@@ -154,9 +152,7 @@ def test_split_child_cannot_omit_its_tile():
     sch.interchange(["k", "i_lo", "i_hi"])
     sch.interchange(["j"], root="./i_lo")
     sch.interchange(["j"], root="./i_hi")
-    with pytest.raises(
-        ScheduleValidationError, match=r"Interchange missing axes"
-    ):
+    with pytest.raises(ScheduleValidationError, match=r"Interchange missing axes"):
         sch.schedule()
 
 
@@ -266,3 +262,25 @@ def test_validation_error_keeps_traceback_with_optional_orange(
     assert "  Dimension: j" in text
     assert "  Error: Inner tile ./j1 (256) exceeds outer tile ./j0 (128)." in text
     assert ("\033[38;5;208m" in text) is orange
+
+
+@pytest.mark.parametrize("axis", ["k", "k0"])
+def test_distribution_on_reduction_axis_is_rejected(axis):
+    _, sch = matmul_scheduler()
+    sch.define_memory_mesh(axes={"mx": 4})
+    sch.define_processor_mesh(axes={"px": 4})
+    sch.tile("k", {"k0": 128})
+    sch.distribute(axis, "px")
+    with pytest.raises(
+        ScheduleValidationError, match="reduction axis.*not supported yet"
+    ):
+        sch.schedule()
+
+
+def test_distribution_on_parallel_axis_is_accepted():
+    _, sch = matmul_scheduler()
+    sch.define_memory_mesh(axes={"mx": 4})
+    sch.define_processor_mesh(axes={"px": 4})
+    sch.tile("i", {"i0": 128})
+    sch.distribute("i0", "px")
+    sch.schedule()

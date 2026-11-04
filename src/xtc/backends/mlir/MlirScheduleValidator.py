@@ -18,6 +18,7 @@ def validate_node_schedule(schedule: MlirNodeSchedule) -> None:
     _check_tile_bounds(schedule)
     _check_interchanges(schedule)
     _check_buffers_outside_subprocessor_loops(schedule)
+    _check_no_reduction_distribution(schedule)
 
 
 def _check_positive_tiles(schedule: MlirNodeSchedule) -> None:
@@ -193,3 +194,24 @@ def _check_buffers_outside_subprocessor_loops(schedule: MlirNodeSchedule) -> Non
                 check_root(axis, inside)
 
     check_root(next(iter(schedule.permutation)), None)
+
+
+def _check_no_reduction_distribution(schedule: MlirNodeSchedule) -> None:
+    """Reject loops over a reduction dimension distributed on processors."""
+    if not schedule.distribution or not schedule.reduction_dims:
+        return
+    axis_dims = {
+        name: basename(dim)
+        for dim, names in (*schedule.tiles.items(), *schedule.splits.items())
+        for name in names
+    }
+    for axis, proc_axis in schedule.distribution.items():
+        dim = axis_dims.get(axis) or basename(axis)
+        if dim in schedule.reduction_dims:
+            raise ScheduleValidationError(
+                f"Distribution of reduction axis {axis} (dimension {dim}) on "
+                f"processor axis {proc_axis} is not supported yet.",
+                node=schedule.node_name,
+                root=parent_name(axis),
+                dimension=dim,
+            )

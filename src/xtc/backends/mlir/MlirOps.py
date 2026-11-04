@@ -291,6 +291,7 @@ class MlirOperatorMatmul(MlirOperator):
                 {"i": Ki, "j": Kj},
                 self.dims_sizes(),
             ],
+            "reduction_dims": [[], list(self.dims("R"))],
             "output_nodes": [reduce],
         }
         return block, attrs
@@ -444,6 +445,7 @@ class MlirOperatorConv2D(MlirOperator):
                 {"b": Kb, "h": Kh, "w": Kw, "f": Kf},
                 self.dims_sizes(),
             ],
+            "reduction_dims": [[], list(self.dims("R"))],
             "output_nodes": [reduce],
         }
         return block, attrs

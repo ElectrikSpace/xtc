@@ -27,6 +27,7 @@ class MlirNodeBackend(MlirBackend):
         no_alias: bool = True,
         id: str | None = None,
         xdsl_type: Type[TensorType] | Type[MemRefType] = MemRefType,
+        reduction_dims: list[str] | None = None,
     ):
         self._graph = None
         self.xdsl_type = xdsl_type
@@ -47,6 +48,7 @@ class MlirNodeBackend(MlirBackend):
         self.dims = dims
         self.dim_sizes = dims.copy() if isinstance(dims, dict) else None
         self.source_op = source_op
+        self.reduction_dims = list(reduction_dims or [])
         # Specification of transformations
         self.loop_stamps = loop_stamps
 

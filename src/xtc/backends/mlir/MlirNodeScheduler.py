@@ -32,6 +32,7 @@ def basename(loop_name: str) -> str:
 class MlirNodeSchedule(PlainNodeSchedule):
     dim_sizes: dict[str, int] | None = field(default=None, repr=False)
     read_rotates: dict[str, list[dict]] = field(default_factory=dict, repr=False)
+    reduction_dims: list[str] = field(default_factory=list, repr=False)
 
 
 class MlirNodeScheduler:
@@ -42,6 +43,7 @@ class MlirNodeScheduler:
         dims: list[str],
         loop_stamps: list[str] = [],
         dim_sizes: dict[str, int] | None = None,
+        reduction_dims: list[str] | None = None,
     ) -> None:
         self._plain_sch = PlainNodeScheduler(
             node_name,
@@ -49,6 +51,7 @@ class MlirNodeScheduler:
             dims,
         )
         self._dim_sizes = dim_sizes
+        self._reduction_dims = list(reduction_dims or [])
         self._read_rotates: dict[str, list[dict]] = {}
 
     @property
@@ -157,6 +160,7 @@ class MlirNodeScheduler:
         return MlirNodeSchedule(**asdict(plain_schedule), 
             dim_sizes=self._dim_sizes,
             read_rotates=deepcopy(self._read_rotates),
+            reduction_dims=self._reduction_dims[:],
         )
 
     @override
