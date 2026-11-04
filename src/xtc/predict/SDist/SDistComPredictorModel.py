@@ -60,9 +60,14 @@ class SDistComPredictorModel(itf.pred.PredictModel):
         trace_path: str | Path | None = None,
         efficiency_path: str | Path | None = None,
         verbose: bool = False,
+        save_temps_dir: str | Path | None = None,
     ):
         self._backend = backend
         self._verbose = verbose
+        self._save_temps_dir = (
+            Path(save_temps_dir).resolve() if save_temps_dir is not None else None
+        )
+        self._predict_count = 0
 
         if machine_description_path is None:
             raise ValueError("Machine description is required")
@@ -105,6 +110,12 @@ class SDistComPredictorModel(itf.pred.PredictModel):
             raise TypeError("double_buffering must be a bool")
         with tempfile.TemporaryDirectory(prefix="sdist-predict-") as temp_dir:
             ir_path = Path(temp_dir) / "sdist_com.mlir"
+            if self._save_temps_dir is not None:
+                self._save_temps_dir.mkdir(parents=True, exist_ok=True)
+                ir_path = (
+                    self._save_temps_dir / f"sdist_com_{self._predict_count}.mlir"
+                )
+                self._predict_count += 1
             self._run_sdist_pipeline(
                 cast(MlirSchedule, schedule),
                 str(ir_path),
@@ -154,6 +165,12 @@ class SDistComPredictorModel(itf.pred.PredictModel):
         self._compiler.mlir_insert_transform_pass()
         self._compiler.mlir_apply_transform_pass()
         self._compiler.mlir_apply_tensor_lowering_pass()
+
+        if self._save_temps_dir is not None:
+            # Saved before lowering so it is available if the pipeline fails.
+            Path(sdist_com_dump_file).with_suffix(".input.mlir").write_text(
+                str(self._mlir_program.mlir_module)
+            )
 
         self._run_sdist_lowering(self._mlir_program, double_buffering=double_buffering)
 
