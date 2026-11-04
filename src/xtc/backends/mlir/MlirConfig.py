@@ -41,9 +41,15 @@ class MlirConfig:
     # compiled as is instead of generating them; skips all the MLIR stages
     mppa_host_c_file: str | None = None
     mppa_accelerator_c_file: str | None = None
+    # Mppa target only: C compiler used for the kvx code ("clang" or "gcc")
+    mppa_kvx_cc: str = "gcc"
     required_extensions: list[str] = field(default_factory=list)
 
     def __post_init__(self):
+        if self.mppa_kvx_cc not in ("clang", "gcc"):
+            raise ValueError(
+                f"mppa_kvx_cc must be 'clang' or 'gcc', got {self.mppa_kvx_cc!r}"
+            )
         object.__setattr__(
             self,
             "llvm_install_dir",
