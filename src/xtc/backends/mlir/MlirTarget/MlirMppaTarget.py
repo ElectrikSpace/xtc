@@ -396,8 +396,7 @@ class MlirMppaBackend:
 
     @property
     def cmd_kvx_cc(self):
-        #return [f"{self._csw_path}/bin/kvx-cos-clang"]
-        return [f"{self._csw_path}/bin/kvx-cos-gcc"]
+        return [f"{self._csw_path}/bin/kvx-cos-{self._config.mppa_kvx_cc}"]
 
     @property
     def cmd_kvx_ld(self):
