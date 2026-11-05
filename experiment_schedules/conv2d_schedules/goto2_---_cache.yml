@@ -18,8 +18,9 @@ schedule:
   w#wc:
   h#hc:
   b#bc:
-  $ L1: pack(C)=pack_c
+  $: pack(C)=pack_c
   c:
+  $ L1:
   r:
   s:
   c#cc: unroll=cu
