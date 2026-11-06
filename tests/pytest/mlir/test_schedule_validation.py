@@ -284,3 +284,25 @@ def test_distribution_on_parallel_axis_is_accepted():
     sch.tile("i", {"i0": 128})
     sch.distribute("i0", "px")
     sch.schedule()
+
+
+def test_pad_buffer_lifts_tile_bounds():
+    _, sch = matmul_scheduler(1, 512, 512)
+    sch.tile("i", {"i1": 1})
+    sch.tile("i", {"iv": 8})
+    with pytest.raises(ScheduleValidationError, match=r"exceeds problem dimension"):
+        sch.schedule()
+
+    _, sch = matmul_scheduler(1, 512, 512)
+    try:
+        sch.buffer_at("i1", pad=True)
+    except Exception:
+        pytest.skip("sdist extension not available")
+    sch.tile("i", {"i1": 1})
+    sch.tile("i", {"iv": 8})
+    sch.interchange(["i", "j", "k", "i1", "iv"])
+    # The first input is not padded: still invalid
+    with pytest.raises(ScheduleValidationError, match=r"exceeds problem dimension"):
+        sch.schedule()
+    sch.pack_at("i1", 0, pad=True)
+    assert sch.schedule().schedule_impl[-1].padded_tiles == ["./i1"]

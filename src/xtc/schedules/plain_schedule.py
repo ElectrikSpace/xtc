@@ -11,6 +11,7 @@ from copy import deepcopy
 
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
 from xtc.schedules.loop_names import make_loop_name, basename
+from xtc.utils.pad import PadStrategies, PadStrategiesArg, normalize_pad_strategies
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,16 @@ class PlainNodeSchedule:
     # non-divisible extents; axes absent from this mapping are vectorized to
     # their (static) tile shape.
     vectorization_sizes: dict[str, int] = field(default_factory=dict)
+    # Tiles whose local buffers are padded (derived from ``pad`` buffers).
+    padded_tiles: list[str] = field(default_factory=list)
+    # Loops carrying a buffer that must be padded (``pad=True``).
+    padded_buffers: list[str] = field(default_factory=list)
+    # Explicit padding strategies of packed buffers: loop -> input idx -> strategies.
+    pack_pad_strategies: dict[str, dict[int, PadStrategies]] = field(
+        default_factory=dict
+    )
+    # Explicit padding strategies of write buffers: loop -> strategies.
+    buffer_pad_strategies: dict[str, PadStrategies] = field(default_factory=dict)
 
     def index_of_dim(self, dim: str) -> int:
         return self.dims.index(basename(dim))
@@ -118,6 +129,10 @@ class PlainNodeScheduler:
         self.fused_producers: list[tuple[str, int]] = []
         self.fused_consumers: list[str] = []
         self.externals: dict[str, str] = {}
+        self.padded_buffers: list[str] = []
+        self.padded_input0: list[str] = []
+        self.pack_pad_strategies: dict[str, dict[int, PadStrategies]] = {}
+        self.buffer_pad_strategies: dict[str, PadStrategies] = {}
 
     def get_plain_schedule(self) -> PlainNodeSchedule:
         return PlainNodeSchedule(
@@ -141,6 +156,10 @@ class PlainNodeScheduler:
             fused_consumers=deepcopy(self.fused_consumers),
             externals=deepcopy(self.externals),
             vectorization_sizes=deepcopy(self.vectorization_sizes),
+            padded_tiles=self._padded_tiles(),
+            padded_buffers=deepcopy(self.padded_buffers),
+            pack_pad_strategies=deepcopy(self.pack_pad_strategies),
+            buffer_pad_strategies=deepcopy(self.buffer_pad_strategies),
         )
 
     @override
@@ -177,6 +196,24 @@ class PlainNodeScheduler:
             tile_name = make_loop_name(root, d)
             self.tiles[tile_root][tile_name] = s
 
+    def _padded_tiles(self) -> list[str]:
+        # A tile is padded when padded buffers (input 0 and output) are at or outside its loop and
+        # its size is not a multiple of the next inner tile of the same dim.
+        order = [a for perm in self.permutation.values() for a in perm]
+        padded: list[str] = []
+        for tiles in self.tiles.values():
+            names = [n for n in order if n in tiles]
+            for outer, inner in zip(names, names[1:]):
+                pos = order.index(outer)
+                # Both the first input and the output must be padded
+                has_pad_buffer = all(
+                    any(b in order and order.index(b) <= pos for b in loops)
+                    for loops in (self.padded_input0, self.padded_buffers)
+                )
+                if has_pad_buffer and tiles[outer] % tiles[inner] != 0:
+                    padded.append(outer)
+        return padded
+
     def interchange(self, permutation: list[str], root: str = DEFAULT_ROOT):
         self.permutation[root] = [make_loop_name(root, a) for a in permutation]
 
@@ -211,8 +248,15 @@ class PlainNodeScheduler:
         axis: str,
         mtype: str | None = None,
         root: str = DEFAULT_ROOT,
+        pad: bool = False,
+        pad_strategies: PadStrategiesArg = None,
     ) -> None:
         buffer_axis = make_loop_name(root, axis)
+        if pad:
+            self.padded_buffers.append(buffer_axis)
+        strategies = normalize_pad_strategies(pad_strategies)
+        if strategies is not None:
+            self.buffer_pad_strategies[buffer_axis] = strategies
         if buffer_axis not in self.write_buffers:
             self.write_buffers[buffer_axis] = []
         self.write_buffers[buffer_axis].append(mtype)
@@ -224,11 +268,17 @@ class PlainNodeScheduler:
         mtype: str | None = None,
         pad: bool = False,
         root: str = DEFAULT_ROOT,
+        pad_strategies: PadStrategiesArg = None,
     ):
         pack_axis = make_loop_name(root, axis)
+        strategies = normalize_pad_strategies(pad_strategies)
+        if strategies is not None:
+            self.pack_pad_strategies.setdefault(pack_axis, {})[input_idx] = strategies
         if pack_axis not in self.packed_buffers:
             self.packed_buffers[pack_axis] = []
         self.packed_buffers[pack_axis].append((input_idx, mtype, pad))
+        if pad and input_idx == 0:
+            self.padded_input0.append(pack_axis)
 
     def define_memory_mesh(self, axes: dict[str, int]):
         assert len(self.memory_mesh) == 0, "Memory mesh has already been defined"

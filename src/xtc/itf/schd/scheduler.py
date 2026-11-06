@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from .schedule import Schedule
 import xtc.itf
 from xtc.schedules.loop_nest import LoopNest
+from xtc.utils.pad import PadStrategiesArg
 
 DEFAULT_ROOT = "."
 
@@ -202,7 +203,12 @@ class Scheduler(ABC):
 
     @abstractmethod
     def buffer_at(
-        self, axis: str, mtype: str | None = None, root: str = DEFAULT_ROOT
+        self,
+        axis: str,
+        mtype: str | None = None,
+        root: str = DEFAULT_ROOT,
+        pad: bool = False,
+        pad_strategies: PadStrategiesArg = None,
     ) -> None:
         """Create a write buffer at a given level.
 
@@ -214,6 +220,13 @@ class Scheduler(ABC):
             axis: localisation of the write buffer
             mtype: buffer memory type for the allocation
             root: the parent split (or the operator's absolute root)
+            pad: if True, the buffer is padded up to a multiple of the inner
+                tile sizes (only the real data is transferred), which allows
+                tiles smaller than the inner tile. Backend may not support it.
+            pad_strategies: optional padding constraints (see ``xtc.utils.pad``)
+                for the buffer, one entry per dimension of the buffered operand
+                in schedule dimension order; each entry is a constraint or a
+                list of constraints. Requires ``pad``.
         """
         ...
 
@@ -225,6 +238,7 @@ class Scheduler(ABC):
         mtype: str | None = None,
         pad: bool = False,
         root: str = DEFAULT_ROOT,
+        pad_strategies: PadStrategiesArg = None,
     ) -> None:
         """Create a packed read buffer at a given level.
 
@@ -239,6 +253,10 @@ class Scheduler(ABC):
             input_idx: input buffer index for the scheduled computation
             mtype: buffer memory type for the allocation
             pad: whether to request padded packing when supported
+            pad_strategies: optional padding constraints (see ``xtc.utils.pad``),
+                one entry per dimension of the packed operand in schedule
+                dimension order; each entry is a constraint or a list of
+                constraints. Requires ``pad``.
             root: the parent split (or the operator's absolute root)
         """
         ...
