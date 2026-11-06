@@ -237,8 +237,16 @@ class XTCTensorExpr(XTCValueExpr):
 
     @classmethod
     def from_dict(cls, op_dict: dict[str, Any]) -> Self:
-        type = XTCTensorType.from_dict(op_dict["type"])
-        return cls(tensor=type)
+        td = op_dict["type"]
+        if td.get("const") or "layout" in td:
+            return cls(
+                shape=tuple(td["shape"]) if "shape" in td else None,
+                dtype=td["dtype"] if "dtype" in td else None,
+                const=bool(td.get("const", False)),
+                layout=list(td["layout"]) if "layout" in td else None,
+            )
+        tensor_type = XTCTensorType.from_dict(td)
+        return cls(tensor=tensor_type)
 
 
 class XTCOpExpr(XTCExpr):

@@ -177,6 +177,10 @@ class XTCTensorType(TensorType):
             tensor_dict["shape"] = list(cast(Iterable[int], self.shape))
         if self.dtype:
             tensor_dict["dtype"] = self.dtype
+        if self.layout is not None:
+            tensor_dict["layout"] = list(self.layout)
+        if self.const:
+            tensor_dict["const"] = True
         return tensor_dict
 
     @override
@@ -185,6 +189,8 @@ class XTCTensorType(TensorType):
         return cls(
             shape=tuple(tensor_dict["shape"]) if "shape" in tensor_dict else None,
             dtype=tensor_dict["dtype"] if "dtype" in tensor_dict else None,
+            const=bool(tensor_dict.get("const", False)),
+            layout=list(tensor_dict["layout"]) if "layout" in tensor_dict else None,
         )
 
 

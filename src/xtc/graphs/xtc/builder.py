@@ -7,7 +7,7 @@ import yaml
 from pathlib import Path
 
 from .graph import XTCGraph
-from .context import XTCGraphContext
+from .context import XTCGraphContext, XTCGraphScope
 from .expr import XTCTensorExpr, XTCExpr
 from .operators import XTCOperator
 from . import op_factory
@@ -40,6 +40,8 @@ class graph_builder:
                 return tuple(tuplify(v) for v in obj)
             else:
                 return obj
+
+        XTCGraphScope._expr_nodes_map.clear()
 
         if "name" in graph_dict:
             XTCGraphContext.name(graph_dict["name"])
@@ -79,6 +81,20 @@ class graph_builder:
     def load(cls, file_name: str | Path) -> None:
         with open(file_name, "r") as f:
             cls.from_dict(yaml.safe_load(f))
+
+    @classmethod
+    def graph_from_dict(cls, graph_dict: dict[str, Any]) -> XTCGraph:
+        XTCGraphContext.push()
+        try:
+            cls.from_dict(graph_dict)
+            return XTCGraphContext.current.graph
+        finally:
+            XTCGraphContext.pop()
+
+    @classmethod
+    def graph_from_file(cls, file_name: str | Path) -> XTCGraph:
+        with open(file_name, "r") as f:
+            return cls.graph_from_dict(yaml.safe_load(f))
 
     def set_outputs(self, *outs: XTCExpr) -> None:
         return XTCGraphContext.current.set_outputs(*outs)
