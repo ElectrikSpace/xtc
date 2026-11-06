@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING, cast
 
 from typing_extensions import override
 
+from xdsl.dialects.builtin import TensorType
+
+from xtc.itf.graph import Node
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
+from xtc.quant.ggml import ggml_quant_format
+from xtc.schedules.loop_names import basename
 from xtc.schedules.loop_nest import LoopNest
 from xtc.utils.pad import PadStrategiesArg
 from xtc.schedules.loop_nest_builder import LoopNestBuilder
@@ -132,6 +137,9 @@ class MlirScheduler(itf.schd.Scheduler):
         else:
             assert isinstance(self._backend, MlirNodeBackend)
             nodes_schedules = [self._current_scheduler.get_node_schedule()]
+        for node_schedule in nodes_schedules:
+            if node_schedule.dequant_packs:
+                self._check_dequant_packs(node_schedule)
         result = MlirSchedule(
             scheduler=self,
             nodes_schedules=nodes_schedules,
@@ -196,6 +204,9 @@ class MlirScheduler(itf.schd.Scheduler):
         # The current implementation exclusively rely on SDist, but upstream
         # transform dialect may be used for some cases.
         assert mtype is None or mtype == "global" or mtype == "local"
+        if self._dequant_producer(input_idx) is not None:
+            self._dequant_pack_at(axis, input_idx, mtype, pad, root)
+            return
         if mtype is None or mtype == "global":
             self._require_extension("sdist", weak=True)
         else:
@@ -203,6 +214,80 @@ class MlirScheduler(itf.schd.Scheduler):
         self._current_scheduler.pack_at(
             axis, input_idx, mtype, pad, root=root, pad_strategies=pad_strategies
         )
+
+    def _dequant_producer(self, input_idx: int) -> Node | None:
+        graph = self._backend._graph
+        if graph is None:
+            return None
+        nodes = [
+            node
+            for node in graph.nodes.values()
+            if node.name == self._current_scheduler.node_name
+        ]
+        if len(nodes) != 1 or input_idx >= len(nodes[0].inputs):
+            return None
+        inp = nodes[0].inputs[input_idx]
+        for node in graph.nodes.values():
+            if inp in node.outputs and node.operator.name == "dequantize":
+                return node
+        return None
+
+    def _dequant_pack_at(
+        self, axis: str, input_idx: int, mtype: str | None, pad: bool, root: str
+    ) -> None:
+        # The pack is the fusion of the dequantize producer at the pack axis:
+        # its tile is computed into a new local buffer from the quantized
+        # blocks. With mtype "local", the quantized blocks are first copied to
+        # local buffers, i.e. only quantized data is transferred.
+        from .MlirGraphBackend import MlirGraphBackend
+
+        assert isinstance(self._backend, MlirGraphBackend)
+        if self._backend.xdsl_type is not TensorType:
+            raise NotImplementedError(
+                "pack_at of a dequantized input requires use_tensor_dialect=True"
+            )
+        assert not pad, "pad is not supported for a dequantized input"
+        producer = self._dequant_producer(input_idx)
+        assert producer is not None
+        fmt = ggml_quant_format(producer.operation.attrs["format"])
+        self._current_scheduler.dequant_pack_at(
+            axis, input_idx, len(fmt.fields), mtype, root=root
+        )
+
+    def _check_dequant_packs(self, schedule: MlirNodeSchedule) -> None:
+        # Tiles of the dequantize op are slices of whole quantization blocks
+        # only if the tiles along its k dimension are aligned on blocks.
+        graph = self._backend._graph
+        assert graph is not None
+        (consumer,) = [
+            node for node in graph.nodes.values() if node.name == schedule.node_name
+        ]
+        _, consumer_inps_maps, _ = consumer.operation.accesses_maps
+        for input_idx in schedule.dequant_packs:
+            producer = self._dequant_producer(input_idx)
+            assert producer is not None
+            qk = ggml_quant_format(producer.operation.attrs["format"]).qk
+            _, _, (producer_out_map,) = producer.operation.accesses_maps
+            dim = consumer_inps_maps[input_idx][producer_out_map.index("k")]
+            sizes = [
+                size
+                for tile_root, tiles in schedule.tiles.items()
+                if basename(tile_root) == dim
+                for size in tiles.values()
+            ] + [
+                start
+                for split_root, splits in schedule.splits.items()
+                if basename(split_root) == dim
+                for start in splits.values()
+                if start != 0
+            ]
+            for size in sizes:
+                if size % qk != 0 and qk % size != 0:
+                    raise ValueError(
+                        f"tiles and splits of '{dim}' must be multiples or "
+                        f"divisors of the {qk} values of the quantization "
+                        f"blocks of input {input_idx}, got {size}"
+                    )
 
     @override
     def vectorize(

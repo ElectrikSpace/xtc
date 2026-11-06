@@ -1,11 +1,13 @@
 #ifndef _XTC_OP_{{func_name}}_H
 #define _XTC_OP_{{func_name}}_H
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C"
 #else
 extern
 #endif
-void {{func_name}}({% for idx in range(inputs|length) %}{% if idx > 0 %}, {% endif %}const float *input{{idx}}{% endfor %}{% for idx in range(outputs|length) %}, float *output{{idx}}{% endfor %});
+void {{func_name}}({% for idx in range(inputs|length) %}{% if idx > 0 %}, {% endif %}const {{inputs[idx].ctype}} *input{{idx}}{% endfor %}{% for idx in range(outputs|length) %}, {{outputs[idx].ctype}} *output{{idx}}{% endfor %});
 
 #endif /* _XTC_OP_{{func_name}}_H */

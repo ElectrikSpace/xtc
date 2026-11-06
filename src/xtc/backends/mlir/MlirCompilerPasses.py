@@ -25,6 +25,7 @@ from mlir.dialects.transform.structured import (
     FuseIntoContainingOp,
 )
 from mlir.dialects.transform.loop import loop_unroll
+from mlir.dialects.transform import tensor as tensor_transform
 from mlir.dialects.transform import SplitHandleOp
 from mlir.ir import (
     Location,
@@ -66,6 +67,7 @@ from .MlirPackOperandShape import (
 _VECTO_SEQ_NAME = "_vecto"
 _SUPER_VECTORIZE_SEQ_NAME = "_super_vectorize"
 _POST_BUFFERIZE_SEQ_NAME = "_post_bufferize"
+_LOCAL_BUFFERS_MAX_BYTES = 64 * 1024
 
 
 @dataclass
@@ -151,6 +153,9 @@ class MlirProgramInsertTransformPass:
         self._nodes_schedules = (
             self._mlir_schedule.schedule_impl if self._mlir_schedule is not None else []
         )
+        # dequantize producer handle -> (pack axis, mtype, number of quantized
+        # operands) of its pack
+        self._dequant_packs: dict[str, tuple[str, str | None, int]] = {}
 
     def run(self) -> None:
         if self._mlir_schedule is None:
@@ -491,6 +496,10 @@ class MlirProgramInsertTransformPass:
                 prod_handle,
                 sched_state.all_loops[loop_name],
             ).results
+            dequant_pack = self._dequant_packs.get(fuse_op_name)
+            if dequant_pack is not None and dequant_pack[0] == loop_name:
+                _, mtype, n_operands = dequant_pack
+                self._localize_dequant_pack(handle, mtype, n_operands)
             # rematch the scheduled op
             new_handle = structured_match(
                 results_=transform.AnyOpType.get(),
@@ -500,6 +509,23 @@ class MlirProgramInsertTransformPass:
             sched_state.handle = new_handle
             sched_state.all_loops[loop_name] = new_loop
             sched_state.prev_container = new_loop
+
+    def _localize_dequant_pack(
+        self, fused_op: OpResult, mtype: str | None, n_operands: int
+    ):
+        if mtype == "local":
+            # Local memory is filled by transfers of quantized blocks only
+            quantized_operands = transform.GetOperandOp(
+                transform.AnyValueType.get(), fused_op, list(range(n_operands))
+            ).result
+            structured.PromoteTensorOp(quantized_operands)
+        # Turn the slice of the whole dequantized tensor written by the
+        # fused op into a new tensor of the tile size, i.e. a local buffer
+        func_op = get_parent_op(
+            transform.AnyOpType.get(), fused_op, isolated_from_above=True
+        )
+        with InsertionPoint(transform.ApplyPatternsOp(func_op).patterns):
+            tensor_transform.ApplyFoldTensorEmptyPatternsOp()
 
     def _generate_tiling_insns(
         self, schedule: MlirNodeSchedule
@@ -1033,6 +1059,11 @@ class MlirProgramInsertTransformPass:
                         continue
                     if idx in op_axes:
                         fuse_destinations[prod_handle] = op_axes[idx]
+                    if idx in schedule.dequant_packs:
+                        self._dequant_packs[prod_handle] = (
+                            op_axes[idx],
+                            *schedule.dequant_packs[idx],
+                        )
                 # get outer dims to fuse, assumes fuse no splitting above loop dim
                 dim_fuse_handles: dict[str, list[str]] = {}
                 for fuse_handle, fuse_dest in fuse_destinations.items():
@@ -1142,7 +1173,9 @@ class MlirProgramApplyPasses:
         pm.run(self._mlir_program.mlir_module.operation)
 
 
-def apply_bufferization_passes(mlir_program: RawMlirProgram, mlir_install_dir: str):
+def apply_bufferization_passes(
+    mlir_program: RawMlirProgram, mlir_install_dir: str, local_buffers: bool = False
+):
     bufferize_options = [
         "bufferize-function-boundaries",
         "function-boundary-type-conversion=identity-layout-map",
@@ -1157,6 +1190,16 @@ def apply_bufferization_passes(mlir_program: RawMlirProgram, mlir_install_dir: s
             "eliminate-empty-tensors",  # causes ops to write directly to out buffer
             f"one-shot-bufferize{{{' '.join(bufferize_options)}}}",
             "drop-equivalent-buffer-results",
-            "func.func(promote-buffers-to-stack)",
         ]
+        + (
+            [
+                # Tiles buffers allocated in loops: allocate them once on
+                # the stack, instead of a malloc or alloca per iteration
+                "func.func(buffer-loop-hoisting)",
+                "func.func(promote-buffers-to-stack"
+                f"{{max-alloc-size-in-bytes={_LOCAL_BUFFERS_MAX_BYTES}}})",
+            ]
+            if local_buffers
+            else ["func.func(promote-buffers-to-stack)"]
+        )
     )

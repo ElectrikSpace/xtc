@@ -40,11 +40,21 @@ class TVMScheduleEmitterTIR(TVMScheduleEmitter):
         obj_var: str = "obj",
         sch_var: str = "sch",
         outf: TextIO = sys.stdout,
+        input_producers: dict[int, tuple[str, str]] | None = None,
     ):
         self._op = op
         self._obj_var = obj_var
         self._sch_var = sch_var
         self._outf = outf
+        # input index -> (block name, operator name) of its producer node
+        self._input_producers = input_producers or {}
+        self._dequant_producers = {
+            idx: name
+            for idx, (name, operator) in self._input_producers.items()
+            if operator == "dequantize"
+        }
+        # (pack block var, pack loop var, mtype, input index) of dequantizing packs
+        self._dequant_packs: list[tuple[str, str, str | None, int]] = []
 
     def _dump_schedule(self, sched: LoopNest):
         root = sched.root_node
@@ -56,10 +66,33 @@ class TVMScheduleEmitterTIR(TVMScheduleEmitter):
         print(f'{block} = {sch}.get_sblock("{self._op.name}")', file=outf)
         dims = sched.abstract_dims
         self._dump_schedule_node(block, dims, sched, root)
+        self._dump_dequantizing_packs()
         print(
             f"{sch} = decompose_reduction_initializers({sch})",
             file=outf,
         )
+
+    def _dump_dequantizing_packs(self):
+        # Inlining the dequantize stage turns each pack of its output into a
+        # pack that reads the quantized blocks and writes dequantized values.
+        # It must come after all the packs are created, as it rewrites every
+        # consumer of the dequantized tensor.
+        sch = self._sch_var
+        outf = self._outf
+        inlined = set()
+        for _, _, _, inp_idx in self._dequant_packs:
+            producer = self._dequant_producers[inp_idx]
+            if producer in inlined:
+                continue
+            print(f'{sch}.compute_inline({sch}.get_sblock("{producer}"))', file=outf)
+            inlined.add(producer)
+        for pack, loop, mtype, _ in self._dequant_packs:
+            if mtype != "local":
+                continue
+            # Local memory is filled by global-to-local transfers only (DMA),
+            # hence stage the raw quantized blocks and dequantize from there.
+            print(f'{pack}_Q = {sch}.cache_read({pack}, 0, "global")', file=outf)
+            print(f"{sch}.compute_at({pack}_Q, {loop})", file=outf)
 
     def _dump_schedule_node(
         self, block: str, dims: list[str], sched: LoopNest, node: LoopNestNode
@@ -82,8 +115,13 @@ class TVMScheduleEmitterTIR(TVMScheduleEmitter):
         if node.fuse_producer_at:
             producers = list({idx: None for idx in node.fuse_producer_at.values()})
             for prod_idx in producers:
+                # get_producers only lists inputs computed by a block
+                if self._input_producers:
+                    pos = sorted(self._input_producers).index(prod_idx)
+                else:
+                    pos = prod_idx
                 print(
-                    f"I_F{prod_idx} = {sch}.get_producers({block})[{prod_idx}]",
+                    f"I_F{prod_idx} = {sch}.get_producers({block})[{pos}]",
                     file=outf,
                 )
         axes = []
@@ -126,6 +164,11 @@ class TVMScheduleEmitterTIR(TVMScheduleEmitter):
                         f"axis={dim}, factor={factor}, offset={offset})",
                         file=outf,
                     )
+                if inp_idx in self._dequant_producers:
+                    num = len(self._dequant_packs)
+                    pack, loop = f"I_DQ{num}", f"L_DQ{num}"
+                    print(f"{pack}, {loop} = I_R{inp_idx}, {axis}", file=outf)
+                    self._dequant_packs.append((pack, loop, mtype, inp_idx))
         if node.fuse_producer_at:
             for axis, prod_idx in node.fuse_producer_at.items():
                 print(f"{sch}.compute_at(I_F{prod_idx}, {axis})", file=outf)
@@ -321,7 +364,9 @@ class TVMScheduler(itf.schd.Scheduler):
     @override
     def schedule(self) -> itf.schd.Schedule:
         io = StringIO()
-        emitter = TVMScheduleEmitterTIR(op=self._op, outf=io)
+        emitter = TVMScheduleEmitterTIR(
+            op=self._op, outf=io, input_producers=self._input_producers()
+        )
         emitter.emit(self)
         sched = io.getvalue()
         assert self._op.name is not None
@@ -369,9 +414,33 @@ class TVMScheduler(itf.schd.Scheduler):
         root: str = DEFAULT_ROOT,
         pad_strategies: PadStrategiesArg = None,
     ) -> None:
-        assert mtype is None or mtype == "global"
+        # On host, "local" only differs from "global" for dequantizing packs:
+        # the quantized blocks are copied to their own buffer before decoding.
+        assert mtype is None or mtype in ("global", "local")
         assert input_idx >= 0 and input_idx < len(self._op.np_inputs_spec())
         self._plain_sch.pack_at(axis, input_idx, mtype, pad, root)
+
+    def _input_producers(self) -> dict[int, tuple[str, str]]:
+        """Block and operator names of the nodes producing the scheduled inputs."""
+        graph = self._backend._graph
+        if graph is None:
+            return {}
+        nodes = [node for node in graph.nodes.values() if node.name == self._op.name]
+        if len(nodes) != 1:
+            return {}
+        graph_inputs = set(graph.inputs)
+        producers = {
+            out: node
+            for node in graph.nodes.values()
+            if node.uid not in graph_inputs
+            for out in node.outputs
+        }
+        input_producers = {}
+        for idx, inp in enumerate(nodes[0].inputs):
+            producer = producers.get(inp)
+            if producer is not None:
+                input_producers[idx] = (producer.name, producer.operator.name)
+        return input_producers
 
     @override
     def vectorize(

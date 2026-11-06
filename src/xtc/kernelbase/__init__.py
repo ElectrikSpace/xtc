@@ -8,7 +8,7 @@ from .canonical import (
     graph_hash,
     graph_key,
 )
-from .ggml import ggml_matmul_graph
+from .ggml import ggml_matmul_graph, ggml_matmul_q_graph
 from .schedule import DescriptSchedule
 from .store import KernelBase, KernelEntry
 
@@ -19,6 +19,7 @@ __all__ = [
     "canonical_graph_dict",
     "canonical_graph_json",
     "ggml_matmul_graph",
+    "ggml_matmul_q_graph",
     "graph_hash",
     "graph_key",
 ]

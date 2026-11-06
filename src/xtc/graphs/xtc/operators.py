@@ -15,6 +15,7 @@ from xtc.utils.math import mulall
 from xtc.itf.operator import Operator
 from xtc.itf.data import Tensor, TensorType
 from xtc.itf.runtime.accelerator import AcceleratorDevice
+from xtc.quant.ggml import ggml_quant_format, ggml_dequantize
 
 from .data import XTCTensor, XTCTensorType
 from .operation import XTCOperation
@@ -253,6 +254,69 @@ class XTCOperMatmul(XTCOperator):
             f"output type mismatch expect: {matmul.type} != {expected_type}"
         )
         return [matmul]
+
+
+class XTCOperDequantize(XTCOperator):
+    """Dequantize ggml quantized rows to float32.
+
+    The input is a ``uint8`` tensor ``(rows, K // qk, block_bytes)`` holding
+    ``rows`` ggml quantized rows of ``K`` values (see ``xtc.quant.ggml``).
+    The output is the float32 ``(rows, K)`` tensor, or ``(K, rows)`` when
+    ``transpose`` is set, which is the ``B`` operand of a matmul for ggml
+    weights (``src0`` is stored as ``(n, k)`` rows).
+    """
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        assert "format" in attrs, "dequantize requires a 'format' attribute"
+        ggml_quant_format(attrs["format"])
+        attrs = {"transpose": False, **attrs}
+        super().__init__("dequantize", **attrs)
+
+    def _rows_k(self, inp_type: XTCTensorType) -> tuple[int, int]:
+        fmt = ggml_quant_format(self.attrs.format)
+        shape = inp_type.constant_shape
+        assert len(shape) == 3 and shape[2] == fmt.block_bytes, (
+            f"dequantize {fmt.name}: expected a (rows, nblocks, {fmt.block_bytes}) "
+            f"input, got {shape}"
+        )
+        assert inp_type.dtype == "uint8", (
+            f"dequantize: expected a uint8 input, got {inp_type.dtype}"
+        )
+        return shape[0], fmt.dequantized_size(shape[1])
+
+    @override
+    def get_operation(
+        self,
+        inps_types: Sequence[XTCTensorType],
+        outs_types: Sequence[XTCTensorType],
+    ) -> XTCOperation:
+        rows, k = self._rows_k(inps_types[0])
+        qk = ggml_quant_format(self.attrs.format).qk
+        dims = {"k": k, "n": rows} if self.attrs.transpose else {"n": rows, "k": k}
+        return self._get_operation(
+            inps_types,
+            outs_types,
+            dims=dims,
+            kinds=("P", "P"),
+            inps_maps=(("n", f"k//{qk}", f"k%{qk}"),),
+            outs_maps=(tuple(dims),),
+        )
+
+    @override
+    def forward_types(
+        self, inputs_types: Sequence[TensorType]
+    ) -> Sequence[XTCTensorType]:
+        assert len(inputs_types) == 1
+        rows, k = self._rows_k(cast(XTCTensorType, inputs_types[0]))
+        shape = (k, rows) if self.attrs.transpose else (rows, k)
+        return [XTCTensorType(shape=shape, dtype="float32", device=self.device)]
+
+    @override
+    def forward(self, inputs: Sequence[Tensor]) -> Sequence[XTCTensor]:
+        out = ggml_dequantize(inputs[0].numpy(), self.attrs.format)
+        if self.attrs.transpose:
+            out = np.ascontiguousarray(out.T)
+        return [XTCTensor(out)]
 
 
 class XTCOperRelu(XTCOperator):

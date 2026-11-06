@@ -5,6 +5,7 @@
 from typing import Any, cast
 from typing_extensions import override
 import tempfile
+import numpy as np
 from pathlib import Path
 import shutil
 import sys
@@ -404,10 +405,23 @@ class PackedOperatorWrapper:
         self._arch = arch
         self._bare_ptr = bare_ptr
 
+    @staticmethod
+    def _c_tensor_spec(spec: dict[str, Any]) -> dict[str, Any]:
+        dtype = np.dtype(spec["dtype"])
+        dl_codes = {"i": 0, "u": 1, "f": 2}
+        ctypes = {"i": "int{}_t", "u": "uint{}_t", "f": {32: "float", 64: "double"}}
+        assert dtype.kind in dl_codes, f"unsupported dtype for C wrapper: {dtype}"
+        bits = dtype.itemsize * 8
+        ctype = ctypes[dtype.kind]
+        ctype = ctype[bits] if isinstance(ctype, dict) else ctype.format(bits)
+        return {**spec, "ctype": ctype, "dl_code": dl_codes[dtype.kind], "dl_bits": bits}
+
     def generate_c(self, output_base: str, header: bool = False) -> None:
         config = {
-            "inputs": self.operation.np_inputs_spec(),
-            "outputs": self.operation.np_outputs_spec(),
+            "inputs": [self._c_tensor_spec(s) for s in self.operation.np_inputs_spec()],
+            "outputs": [
+                self._c_tensor_spec(s) for s in self.operation.np_outputs_spec()
+            ],
             "func_name": self.func_name,
             "tvm_ffi_func_name": self.packed_func_name,
         }

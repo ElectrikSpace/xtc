@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import xtc.graphs.xtc.op as O
 from xtc.graphs.xtc.graph import XTCGraph
+from xtc.quant.ggml import ggml_quant_format
 
 __all__ = [
     "ggml_matmul_graph",
+    "ggml_matmul_q_graph",
 ]
 
 
@@ -30,5 +32,26 @@ def ggml_matmul_graph(
     a = O.tensor((m, k), dtype, name="A")
     b = O.tensor((k, n), dtype, name="B", layout=[1, 0])
     with O.graph(name=name) as gb:
+        O.matmul(a, b, name="C")
+    return gb.graph
+
+
+def ggml_matmul_q_graph(
+    m: int, n: int, k: int, qtype: str, name: str = "matmul_q"
+) -> XTCGraph:
+    """XTC graph of a ggml ``MUL_MAT`` node with a quantized src0.
+
+    Same convention as :func:`ggml_matmul_graph`, except that ``Bq`` = src0 is
+    the raw ggml buffer of ``n`` rows of ``k // qk`` blocks, i.e. a uint8
+    tensor of shape (n, k // qk, block_bytes). It is decoded by the ``B``
+    dequantize node into the logical (k, n) float32 operand of ``C``.
+
+    The compiled kernel takes bare pointers ``(A=src1, Bq=src0, C=dst)``.
+    """
+    fmt = ggml_quant_format(qtype)
+    a = O.tensor((m, k), "float32", name="A")
+    bq = O.tensor(fmt.quantized_shape(n, k), "uint8", name="Bq")
+    with O.graph(name=name) as gb:
+        b = O.dequantize(bq, format=fmt.name, transpose=True, name="B")
         O.matmul(a, b, name="C")
     return gb.graph

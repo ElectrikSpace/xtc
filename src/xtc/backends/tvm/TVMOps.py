@@ -3,7 +3,7 @@
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing_extensions import override
 from typing import Any, Type, TypeAlias, cast
 
@@ -12,6 +12,7 @@ from xtc.utils.text import to_cname
 
 from xtc.itf.graph import Operation, Graph, Node
 from xtc.graphs.xtc.data import XTCTensorType
+from xtc.quant.ggml import GGMLQuantFormat, ggml_quant_format
 
 __all__ = [
     "TVMBaseExpr",
@@ -295,6 +296,98 @@ class TVMOperatorMatmul(TVMOperator):
     def outputs_types(self) -> tuple[str, ...]:
         dtype = self.args[-1]
         return (dtype,)
+
+
+def tvm_fp16_bits_to_float32(lo: Any, hi: Any) -> Any:
+    """float32 value of the little endian fp16 bytes ``lo``, ``hi``.
+
+    Decoded with integer arithmetic, as fp16 types are not supported by all
+    code generators (e.g. TVM C source). Inf/NaN are not handled: ggml scales
+    are finite.
+    """
+    u32 = lambda x: tvm.tirx.const(x, "uint32")
+    h = lo.astype("uint32") | (hi.astype("uint32") << u32(8))
+    e = (h >> u32(10)) & u32(0x1F)
+    m = h & u32(0x3FF)
+    normal = tvm.tirx.reinterpret(
+        "float32", ((e + u32(112)) << u32(23)) | (m << u32(13))
+    )
+    subnormal = m.astype("float32") * tvm.tirx.const(2.0**-24, "float32")
+    mag = tvm.tirx.Select(e == u32(0), subnormal, normal)
+    return tvm.tirx.Select((h & u32(0x8000)) != u32(0), -mag, mag)
+
+
+class _TVMDecodeOps:
+    @staticmethod
+    def f32(x: Any) -> Any:
+        return x.astype("float32")
+
+    fp16 = staticmethod(tvm_fp16_bits_to_float32)
+
+
+def tvm_ggml_decode(Q: TETensor, fmt: GGMLQuantFormat, n: Any, k: Any) -> Any:
+    """Value ``k`` of the quantized row ``n`` of ``Q`` (rows, nblocks, block_bytes)."""
+    b = k // fmt.qk
+    e = k % fmt.qk
+    fields = [
+        Q[n, b, field.offset + field.index(e)].astype("int32") for field in fmt.fields
+    ]
+    return fmt.decode(_TVMDecodeOps, e, *fields)
+
+
+class TVMOperatorDequantize(TVMOperator):
+    DEFAULT_NAME = "dequantize"
+
+    def __init__(
+        self, args: tuple[Any, ...], attrs: dict[str, Any], name: str | None = None
+    ) -> None:
+        attrs = {"transpose": False, **attrs}
+        super().__init__(args, attrs, name)
+        self._fmt = ggml_quant_format(self.attrs["format"])
+
+    @override
+    def dims(self, kind: str = "") -> tuple[str, ...]:
+        if kind == "R":
+            return ()
+        return ("k", "n") if self.attrs["transpose"] else ("n", "k")
+
+    @override
+    def dims_sizes(self) -> dict[str, int]:
+        return dict(zip(self.dims(), self.args[:2]))
+
+    @override
+    def generate_op(
+        self, inputs: Sequence[TETensor] | None = None
+    ) -> tuple[TETensor, ...]:
+        if inputs is None:
+            Q = te.placeholder(self.inputs_dims()[0], name="Q", dtype="uint8")
+        else:
+            (Q,) = cast(Sequence[Any], inputs)
+        fmt = self._fmt
+        fcompute: Callable[[Any, Any], Any]
+        if self.attrs["transpose"]:
+            fcompute = lambda k, n: tvm_ggml_decode(Q, fmt, n, k)
+        else:
+            fcompute = lambda n, k: tvm_ggml_decode(Q, fmt, n, k)
+        O = te.compute(self.outputs_dims()[0], fcompute, name=self.name)
+        return cast(tuple[TETensor], (Q, O))
+
+    @override
+    def inputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        sizes = self.dims_sizes()
+        return (self._fmt.quantized_shape(sizes["n"], sizes["k"]),)
+
+    @override
+    def inputs_types(self) -> tuple[str, ...]:
+        return ("uint8",)
+
+    @override
+    def outputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        return (tuple(self.args[:2]),)
+
+    @override
+    def outputs_types(self) -> tuple[str, ...]:
+        return ("float32",)
 
 
 class TVMOperatorRelu(TVMOperator):
@@ -717,6 +810,7 @@ class TVMOperators:
         return getattr(cls, name)
 
     matmul = TVMOperatorMatmul
+    dequantize = TVMOperatorDequantize
     relu = TVMOperatorRelu
     conv2d = TVMOperatorConv2D
     pad2d = TVMOperatorPad2D

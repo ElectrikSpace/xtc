@@ -55,16 +55,17 @@ typedef struct {
 /* Bridge bare pointers to TVM packed function with DLTensor objects */
 extern int32_t {{tvm_ffi_func_name}}(void *ctx, TVMFFIAny *args, int32_t num_args, TVMFFIAny *result);
 
-void {{func_name}}({% for idx in range(inputs|length) %}{% if idx > 0 %}, {% endif %}const float *input{{idx}}{% endfor %}{% for idx in range(outputs|length) %}, float *output{{idx}}{% endfor %}) {
-    static const DLDataType dtype = { kDLFloat, 32, 1 };
+void {{func_name}}({% for idx in range(inputs|length) %}{% if idx > 0 %}, {% endif %}const {{inputs[idx].ctype}} *input{{idx}}{% endfor %}{% for idx in range(outputs|length) %}, {{outputs[idx].ctype}} *output{{idx}}{% endfor %}) {
     static const DLDevice dev = { kDLCPU, 0 };
 {% for idx in range(inputs|length) %}
+    static const DLDataType DL_input{{idx}}_dtype = { {{inputs[idx].dl_code}}, {{inputs[idx].dl_bits}}, 1 };
     static const int64_t DL_input{{idx}}_shape[{{inputs[idx].shape|length}}] = { {% for dim in inputs[idx].shape %}{{dim}}, {% endfor %} };
-    DLTensor DL_input{{idx}} = { (void *)input{{idx}}, dev, {{inputs[idx].shape|length}}, dtype, (int64_t *)DL_input{{idx}}_shape, NULL, 0 };
+    DLTensor DL_input{{idx}} = { (void *)input{{idx}}, dev, {{inputs[idx].shape|length}}, DL_input{{idx}}_dtype, (int64_t *)DL_input{{idx}}_shape, NULL, 0 };
 {% endfor %}
 {% for idx in range(outputs|length) %}
+    static const DLDataType DL_output{{idx}}_dtype = { {{outputs[idx].dl_code}}, {{outputs[idx].dl_bits}}, 1 };
     static const int64_t DL_output{{idx}}_shape[{{outputs[idx].shape|length}}] = { {% for dim in outputs[idx].shape %}{{dim}}, {% endfor %} };
-    DLTensor DL_output{{idx}} = { (void *)output{{idx}}, dev, {{outputs[idx].shape|length}}, dtype, (int64_t *)DL_output{{idx}}_shape, NULL, 0 };
+    DLTensor DL_output{{idx}} = { (void *)output{{idx}}, dev, {{outputs[idx].shape|length}}, DL_output{{idx}}_dtype, (int64_t *)DL_output{{idx}}_shape, NULL, 0 };
 {% endfor %}
     TVMFFIAny args[{{inputs|length}} + {{outputs|length}}] = {
       {%- for idx in range(inputs|length) %}

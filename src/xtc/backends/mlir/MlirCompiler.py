@@ -220,7 +220,14 @@ class MlirProgramCompiler:
 
     def mlir_apply_tensor_lowering_pass(self) -> None:
         assert self._config.mlir_install_dir
-        apply_bufferization_passes(self._mlir_program, self._config.mlir_install_dir)
+        local_buffers = self._mlir_schedule is not None and any(
+            schedule.dequant_packs for schedule in self._mlir_schedule.schedule_impl
+        )
+        apply_bufferization_passes(
+            self._mlir_program,
+            self._config.mlir_install_dir,
+            local_buffers=local_buffers,
+        )
         # apply the post-bufferization transform sequence
         if self.using_tensors:
             apply_transform_pass = MlirProgramApplyTransformPass(

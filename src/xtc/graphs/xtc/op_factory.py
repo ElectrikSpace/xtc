@@ -10,6 +10,7 @@ from .expr import (
     XTCExpr,
     XTCTensorExpr,
     XTCMatmulExpr,
+    XTCDequantizeExpr,
     XTCReluExpr,
     XTCAddExpr,
     XTCMulExpr,
@@ -24,6 +25,7 @@ from .expr import (
 
 __all__ = [
     "matmul",
+    "dequantize",
     "conv2d",
     "pad2d",
     "unpad",
@@ -44,6 +46,13 @@ __all__ = [
 def matmul(a: XTCExpr, b: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
     return XTCGraphContext.append(
         XTCMatmulExpr(a, b, **attrs),
+        name=name,
+    )
+
+
+def dequantize(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
+    return XTCGraphContext.append(
+        XTCDequantizeExpr(inp, **attrs),
         name=name,
     )
 

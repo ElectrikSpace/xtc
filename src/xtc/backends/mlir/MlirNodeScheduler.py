@@ -35,6 +35,13 @@ class MlirNodeSchedule(PlainNodeSchedule):
     dim_sizes: dict[str, int] | None = field(default=None, repr=False)
     read_rotates: dict[str, list[dict]] = field(default_factory=dict, repr=False)
     reduction_dims: list[str] = field(default_factory=list, repr=False)
+    # Packs of inputs produced by a dequantize node: input index -> (mtype,
+    # number of quantized operands of the producer). The producer is fused at
+    # the pack axis (also in fused_producers), and for "local", its quantized
+    # operands are copied to local buffers.
+    dequant_packs: dict[int, tuple[str | None, int]] = field(
+        default_factory=dict, repr=False
+    )
 
 
 class MlirNodeScheduler:
@@ -63,6 +70,7 @@ class MlirNodeScheduler:
         self._dim_sizes = dim_sizes
         self._reduction_dims = list(reduction_dims or [])
         self._read_rotates: dict[str, list[dict]] = {}
+        self._dequant_packs: dict[int, tuple[str | None, int]] = {}
 
     @property
     def node_name(self) -> str:
@@ -127,6 +135,17 @@ class MlirNodeScheduler:
                 "options (e.g. smem_axes/pe_axes)"
             )
 
+    def dequant_pack_at(
+        self,
+        axis: str,
+        input_idx: int,
+        n_operands: int,
+        mtype: str | None = None,
+        root: str = DEFAULT_ROOT,
+    ):
+        self._plain_sch.fuse_producer_at(axis, input_idx, root)
+        self._dequant_packs[input_idx] = (mtype, n_operands)
+
     def define_memory_mesh(self, axes: dict[str, int]):
         self._check_mesh_not_from_device()
         self._plain_sch.define_memory_mesh(axes)
@@ -187,6 +206,7 @@ class MlirNodeScheduler:
             dim_sizes=self._dim_sizes,
             read_rotates=deepcopy(self._read_rotates),
             reduction_dims=self._reduction_dims[:],
+            dequant_packs=dict(self._dequant_packs),
         )
 
     @override

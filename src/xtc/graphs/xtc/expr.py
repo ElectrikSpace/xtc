@@ -15,6 +15,7 @@ from .operators import (
     XTCOperator,
     XTCOperTensor,
     XTCOperMatmul,
+    XTCOperDequantize,
     XTCOperRelu,
     XTCOperAdd,
     XTCOperMul,
@@ -302,6 +303,11 @@ class XTCMatmulExpr(XTCOpExpr):
                 y,
             ),
         )
+
+
+class XTCDequantizeExpr(XTCOpExpr):
+    def __init__(self, inp: XTCExpr, **attrs: Any) -> None:
+        super().__init__(XTCOperDequantize(**attrs), (inp,))
 
 
 class XTCReluExpr(XTCOpExpr):

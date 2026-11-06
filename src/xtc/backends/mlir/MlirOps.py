@@ -15,18 +15,21 @@ from xdsl.dialects.builtin import (
     f16,
     f32,
     f64,
+    i8,
+    i32,
     i64,
     UnitAttr,
     StringAttr,
     AffineMapAttr,
 )
-from xdsl.ir import Block, BlockArgument, Region
+from xdsl.ir import Block, BlockArgument, Region, SSAValue
 from xdsl.ir.affine import AffineMap
 from xdsl.irdl import irdl_op_definition
 from xdsl.builder import ImplicitBuilder
 
 from xtc.itf.graph import Operation
 from xtc.graphs.xtc.data import XTCTensorType
+from xtc.quant.ggml import GGMLField, ggml_quant_format
 from xtc.utils.math import mulall
 
 
@@ -1070,6 +1073,211 @@ class MlirOperatorUnpad(MlirOperator):
         return (dtype,)
 
 
+def _fp16_bits_to_f32(lo: SSAValue, hi: SSAValue) -> SSAValue:
+    """f32 value of the little endian fp16 bytes ``lo``, ``hi`` (i32 values).
+
+    Decoded with integer arithmetic, as fp16 is not supported by all targets.
+    Inf/NaN are not handled: ggml scales are finite.
+    """
+    c = lambda v: arith.ConstantOp(builtin.IntegerAttr(v, i32)).result
+    h = arith.OrIOp(lo, arith.ShLIOp(hi, c(8))).result
+    e = arith.AndIOp(arith.ShRUIOp(h, c(10)), c(0x1F)).result
+    m = arith.AndIOp(h, c(0x3FF)).result
+    normal_bits = arith.OrIOp(
+        arith.ShLIOp(arith.AddiOp(e, c(112)), c(23)), arith.ShLIOp(m, c(13))
+    )
+    normal = arith.BitcastOp(normal_bits, f32).result
+    subnormal = arith.MulfOp(
+        arith.UIToFPOp(m, f32), arith.ConstantOp(builtin.FloatAttr(2.0**-24, f32))
+    ).result
+    mag = arith.SelectOp(arith.CmpiOp(e, c(0), "eq"), subnormal, normal).result
+    is_neg = arith.CmpiOp(arith.AndIOp(h, c(0x8000)), c(0), "ne")
+    return arith.SelectOp(is_neg, arith.NegfOp(mag), mag).result
+
+
+class _MlirInt:
+    """i32 value with the integer operators of ``GGMLDecodeOps`` (unsigned)."""
+
+    def __init__(self, value: SSAValue) -> None:
+        self.value = value
+
+    @staticmethod
+    def _ssa(x: "_MlirInt | int") -> SSAValue:
+        if isinstance(x, _MlirInt):
+            return x.value
+        return arith.ConstantOp(builtin.IntegerAttr(x, i32)).result
+
+    def _op(self, op: Any, other: "_MlirInt | int", rhs: bool = False) -> "_MlirInt":
+        lhs, rhs_ = (other, self) if rhs else (self, other)
+        return _MlirInt(op(self._ssa(lhs), self._ssa(rhs_)).result)
+
+    __add__ = lambda self, o: self._op(arith.AddiOp, o)
+    __radd__ = lambda self, o: self._op(arith.AddiOp, o, rhs=True)
+    __sub__ = lambda self, o: self._op(arith.SubiOp, o)
+    __rsub__ = lambda self, o: self._op(arith.SubiOp, o, rhs=True)
+    __mul__ = lambda self, o: self._op(arith.MuliOp, o)
+    __rmul__ = lambda self, o: self._op(arith.MuliOp, o, rhs=True)
+    __and__ = lambda self, o: self._op(arith.AndIOp, o)
+    __or__ = lambda self, o: self._op(arith.OrIOp, o)
+    __lshift__ = lambda self, o: self._op(arith.ShLIOp, o)
+    __rshift__ = lambda self, o: self._op(arith.ShRUIOp, o)
+    __floordiv__ = lambda self, o: self._op(arith.DivUIOp, o)
+    __mod__ = lambda self, o: self._op(arith.RemUIOp, o)
+
+
+class _MlirFloat:
+    """f32 value with the float operators of ``GGMLDecodeOps``."""
+
+    def __init__(self, value: SSAValue) -> None:
+        self.value = value
+
+    __add__ = lambda self, o: _MlirFloat(arith.AddfOp(self.value, o.value).result)
+    __sub__ = lambda self, o: _MlirFloat(arith.SubfOp(self.value, o.value).result)
+    __mul__ = lambda self, o: _MlirFloat(arith.MulfOp(self.value, o.value).result)
+
+
+class _MlirDecodeOps:
+    @staticmethod
+    def f32(x: _MlirInt) -> _MlirFloat:
+        return _MlirFloat(arith.SIToFPOp(x.value, f32).result)
+
+    @staticmethod
+    def fp16(lo: _MlirInt, hi: _MlirInt) -> _MlirFloat:
+        return _MlirFloat(_fp16_bits_to_f32(lo.value, hi.value))
+
+
+class MlirOperatorDequantize(MlirOperator):
+    """Dequantization of ggml blocks, see ``xtc.quant.ggml``.
+
+    The quantized input (rows, K // qk, block_bytes) is read through one view
+    per field of the format (e.g. scale low byte, scale high byte, quants)
+    such that each element of the output only depends on affine accesses:
+    tiling the op along k by multiples or divisors of qk gives slices of
+    whole blocks, which a dequantizing pack can copy to local memory as is.
+    """
+
+    DEFAULT_NAME = "dequantize"
+    KINDS = "PP"
+
+    def __init__(
+        self,
+        args: tuple[Any, ...],
+        attrs: dict[str, Any],
+        name: str | None = None,
+        op_type: Type[MemRefType] | Type[TensorType] = MemRefType,
+    ) -> None:
+        attrs = {"transpose": False, **attrs}
+        super().__init__(args, attrs, name, op_type)
+        self._fmt = ggml_quant_format(self.attrs["format"])
+
+    @override
+    def dims(self, kind: str = "") -> tuple[str, ...]:
+        if kind == "R":
+            return ()
+        return ("k", "n") if self.attrs["transpose"] else ("n", "k")
+
+    @override
+    def dims_sizes(self) -> dict[str, int]:
+        return dict(zip(self.dims(), self.args[:2]))
+
+    @override
+    def generate_op(
+        self, block: Block | None = None, args: Sequence[BlockArgument] = []
+    ) -> tuple[Block, OpAttrs]:
+        fmt = self._fmt
+        if block is None:
+            ops_types = [
+                self.op_type(i8, self.inputs_dims()[0]),
+                self.op_type(f32, self.outputs_dims()[0]),
+            ]
+            block = Block(arg_types=ops_types)
+            args = block.args
+        assert len(args) == 2
+        rows, nb, _ = self.inputs_dims()[0]
+        k_idx = self.dims().index("k")
+        if self.attrs["transpose"]:
+            to_kn = lambda d0, d1: (d0, d1)
+        else:
+            to_kn = lambda d0, d1: (d1, d0)
+
+        def field_map(field: GGMLField) -> AffineMap:
+            def access(d0: Any, d1: Any) -> tuple[Any, ...]:
+                k, n = to_kn(d0, d1)
+                return (n, k // fmt.qk, field.index(k % fmt.qk))
+
+            return AffineMap.from_callable(access)
+
+        using_tensors = self.op_type == TensorType
+        with ImplicitBuilder(block):
+            views = []
+            for field in fmt.fields:
+                offsets = [0, 0, field.offset]
+                sizes = [rows, nb, field.size]
+                if using_tensors:
+                    view = tensor.ExtractSliceOp.from_static_parameters(
+                        source=args[0], offsets=offsets, sizes=sizes, strides=[1] * 3
+                    )
+                else:
+                    view = memref.SubviewOp.from_static_parameters(
+                        source=args[0],
+                        source_type=args[0].type,  # type: ignore
+                        offsets=offsets,
+                        sizes=sizes,
+                        strides=[1] * 3,
+                    )
+                views.append(view.result)
+            block_in = Block(arg_types=[i8] * len(fmt.fields) + [f32])
+            with ImplicitBuilder(block_in):
+                k = arith.IndexCastOp(linalg.IndexOp(k_idx), i32).result
+                e = _MlirInt(k) % fmt.qk
+                fields = [
+                    _MlirInt(arith.ExtUIOp(byte, i32).result)
+                    for byte in block_in.args[:-1]
+                ]
+                value = fmt.decode(_MlirDecodeOps, e, *fields)
+                linalg.YieldOp(value.value)
+            dequant = linalg.GenericOp(
+                inputs=views,
+                outputs=(args[1],),
+                body=Region([block_in]),  # type: ignore # mypy issue with dataclass
+                indexing_maps=[
+                    *(AffineMapAttr(field_map(field)) for field in fmt.fields),
+                    AffineMapAttr(AffineMap.identity(2)),
+                ],
+                iterator_types=[StringAttr("parallel")] * 2,
+                result_types=(args[1].type,) if using_tensors else (),
+            )
+        dequant_node_id = f"{self.name}"
+        dequant.attributes[f"__xtc_id_{dequant_node_id}_"] = UnitAttr()
+        attrs = {
+            "nodes_map": {
+                dequant_node_id: dequant,
+            },
+            "dims_sizes": [
+                self.dims_sizes(),
+            ],
+            "output_nodes": [dequant],
+        }
+        return block, attrs
+
+    @override
+    def inputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        sizes = self.dims_sizes()
+        return (self._fmt.quantized_shape(sizes["n"], sizes["k"]),)
+
+    @override
+    def inputs_types(self) -> tuple[str, ...]:
+        return ("uint8",)
+
+    @override
+    def outputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        return (tuple(self.args[:2]),)
+
+    @override
+    def outputs_types(self) -> tuple[str, ...]:
+        return ("float32",)
+
+
 class MlirOperators:
     @classmethod
     def from_name(cls, name: str) -> Type[MlirOperator]:
@@ -1077,6 +1285,7 @@ class MlirOperators:
         return getattr(cls, name)
 
     matmul = MlirOperatorMatmul
+    dequantize = MlirOperatorDequantize
     conv2d = MlirOperatorConv2D
     relu = MlirOperatorRelu
     add = MlirOperatorAdd
