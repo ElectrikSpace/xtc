@@ -336,6 +336,7 @@ class MlirProgramToMlirMppaPass:
                     "sdist-com-apply-double-buffering{split-outer-transfers=true}"
                 )
             passes.append("sdist-com-tokenize-group-transfers")
+            passes.append("sdist-com-wait-broadcast")
         return self._with_canonicalize_cse(passes)
 
     def _hw_dependent_pipeline(self) -> list[str]:
