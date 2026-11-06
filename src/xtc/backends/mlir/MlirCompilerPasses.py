@@ -5,7 +5,6 @@
 from typing import cast
 from dataclasses import dataclass
 
-import numpy as np
 from mlir.dialects import transform
 from mlir.dialects.transform import (
     NamedSequenceOp,
@@ -47,11 +46,22 @@ except ImportError:
 
 from xtc.schedules.loop_names import make_loop_name, parent_name, basename
 from xtc.utils.ext_tools import transform_opts
+from xtc.utils.pad import (
+    PadStrategies,
+    compute_padding,
+    zero_multiple,
+    has_pad_partial_tiles,
+    needs_zero_fill,
+    pad_divisible_by,
+)
 
 from .MlirProgram import RawMlirProgram
 from .MlirScheduler import MlirSchedule, MlirNodeSchedule
 from .MlirTarget import MlirTarget
-from .MlirPackOperandShape import tiled_tensor_shape_for_input
+from .MlirPackOperandShape import (
+    abstract_extents_after_ancestor_tiles,
+    operand_axis_names_for_input,
+)
 
 _VECTO_SEQ_NAME = "_vecto"
 _SUPER_VECTORIZE_SEQ_NAME = "_super_vectorize"
@@ -333,6 +343,7 @@ class MlirProgramInsertTransformPass:
         if not permutation:
             return sched_state
 
+        guarded = False
         # Materialize the loops
         for loop_name in permutation:
             # Manage the splits
@@ -369,11 +380,15 @@ class MlirProgramInsertTransformPass:
                     loop_name=loop_name,
                     schedule=schedule,
                     sched_state=sched_state,
+                    root=root,
+                    tiles_sizes_by_loops=tiles_sizes_by_loops,
                 )
 
             # Manage the strip-mining
             if loop_name in schedule.vectorization:
                 self._distribute_buffers_if_any(loop_name, schedule, sched_state)
+                self._guard_partial_tiles(sched_state, schedule)
+                guarded = True
                 self._vectorize(sched_state, self._vector_sizes_for(schedule))
                 break
             elif loop_name in tiles_sizes_by_loops:
@@ -394,6 +409,9 @@ class MlirProgramInsertTransformPass:
                 self._fuse_producers_into_loop(
                     loop_name, producer_fuse_axes, schedule, sched_state
                 )
+
+        if not guarded:
+            self._guard_partial_tiles(sched_state, schedule)
 
         # For now on, the focus is on the outermost loop
         if sched_state.all_loops:
@@ -482,46 +500,6 @@ class MlirProgramInsertTransformPass:
             sched_state.handle = new_handle
             sched_state.all_loops[loop_name] = new_loop
             sched_state.prev_container = new_loop
-
-    def _resolve_local_pack_padding(
-        self,
-        schedule: MlirNodeSchedule,
-        entry: tuple[int, str | None, bool],
-        *,
-        root: str,
-        pack_loop: str,
-        tiles_sizes_by_loops: dict[str, list[int]],
-    ) -> tuple[int, tuple[tuple[str, int], ...]]:
-        """Return input index and abstract per-dimension slack for ``local_buffer_at``."""
-        from .MlirGraphBackend import MlirGraphBackend
-        from .MlirNodeBackend import MlirNodeBackend
-
-        assert self._mlir_schedule is not None
-        graph_backend = cast(MlirGraphBackend, self._mlir_schedule.scheduler.backend)
-        node_backend = cast(MlirNodeBackend, graph_backend.nodes[schedule.node_name])
-        specs = node_backend.np_inputs_spec()
-
-        input_idx, _, wants_heuristic = entry
-        if not wants_heuristic:
-            return input_idx, tuple((d, 0) for d in schedule.dims)
-
-        dtype_str = specs[input_idx]["dtype"]
-        byte_width = int(np.dtype(dtype_str).itemsize)
-        buffer_shape = tiled_tensor_shape_for_input(
-            schedule,
-            root=root,
-            pack_loop=pack_loop,
-            tiles_sizes_by_loops=tiles_sizes_by_loops,
-            node_backend=node_backend,
-            input_idx=input_idx,
-        )
-        hinted = self._target.pack_at_padding_heuristic(
-            schedule_dims=schedule.dims,
-            input_idx=input_idx,
-            input_element_bytewidth=byte_width,
-            input_buffer_shape=buffer_shape,
-        )
-        return input_idx, tuple((d, int(hinted.get(d, 0))) for d in schedule.dims)
 
     def _generate_tiling_insns(
         self, schedule: MlirNodeSchedule
@@ -623,6 +601,18 @@ class MlirProgramInsertTransformPass:
         transform.AnnotateOp(new_loop, loop_name)
 
         return new_loop
+
+    def _guard_partial_tiles(
+        self, sched_state: SchedulingState, schedule: MlirNodeSchedule
+    ) -> None:
+        # Guard the tiled op against padded iterations (no-op without padded tiles)
+        if "sdist" not in self._mlir_program.mlir_extensions:
+            return
+        if not schedule.pad_partial_tiles:
+            return
+        assert sdist_transform is not None
+        guard = sdist_transform.SDistGuardPartialTileOp(sched_state.handle)
+        sched_state.handle = guard.results[0]
 
     def _vector_sizes_for(self, schedule: MlirNodeSchedule) -> list[int] | None:
         # Translate the per-axis vector widths into the per-iteration-dim list
@@ -778,6 +768,131 @@ class MlirProgramInsertTransformPass:
                 axes=dist_buffer["memory_axes"],
             )
 
+    def _innermost_tiles(self, schedule: MlirNodeSchedule) -> dict[str, int]:
+        # Innermost tile size (in loop order) of each dimension.
+        order = [a for perm in schedule.permutation.values() for a in perm]
+        inner_by_dim: dict[str, int] = {}
+        for dim in schedule.dims:
+            inner = 1
+            best = -1
+            for root, dim_tiles in schedule.tiles.items():
+                if basename(root) != dim:
+                    continue
+                for name, size in dim_tiles.items():
+                    pos = order.index(name) if name in order else -1
+                    if pos > best:
+                        best, inner = pos, size
+            inner_by_dim[dim] = inner
+        return inner_by_dim
+
+    def _buffer_padding(
+        self,
+        schedule: MlirNodeSchedule,
+        operand_idx: int,
+        strategies: PadStrategies | None,
+        *,
+        root: str,
+        buffer_loop: str,
+        tiles_sizes_by_loops: dict[str, list[int]],
+    ) -> tuple[list[int], list[int], list[int], list[int]]:
+        """
+        Returns ``(window, fill, alloc, multiples)`` per operand dimension of a padded
+        local buffer. ``fill`` is the zero-filled (computed) extent and
+        ``alloc`` the allocated extent, ``multiples`` the multiple the (possibly
+        dynamic) window is zero filled to. Strategies follow the schedule dim
+        order; without strategies the buffer is zero filled up to a multiple
+        of the innermost tile of each dimension.
+        """
+        from .MlirGraphBackend import MlirGraphBackend
+        from .MlirNodeBackend import MlirNodeBackend
+
+        assert self._mlir_schedule is not None
+        graph_backend = cast(MlirGraphBackend, self._mlir_schedule.scheduler.backend)
+        node_backend = cast(MlirNodeBackend, graph_backend.nodes[schedule.node_name])
+        axes = operand_axis_names_for_input(node_backend, schedule.dims, operand_idx)
+        assert axes is not None, "padding needs the operand axes"
+        buffer_dims = [d for d in schedule.dims if d in axes]
+        if strategies is None:
+            inner = self._innermost_tiles(schedule)
+            strategies = [
+                [pad_divisible_by(inner[dim], zero=True)] for dim in buffer_dims
+            ]
+        assert len(strategies) == len(buffer_dims), (
+            f"expected {len(buffer_dims)} padding strategies for dimensions "
+            f"{buffer_dims}, got {len(strategies)}"
+        )
+        extents = abstract_extents_after_ancestor_tiles(
+            schedule,
+            root=root,
+            pack_loop=buffer_loop,
+            tiles_sizes_by_loops=tiles_sizes_by_loops,
+            node_backend=node_backend,
+        )
+        padding = {
+            dim: compute_padding(extents[dim], constraints)
+            for dim, constraints in zip(buffer_dims, strategies)
+        }
+        window = [extents[ax] for ax in axes]
+        fill = [padding[ax][0] for ax in axes]
+        alloc = [padding[ax][1] for ax in axes]
+        multiples = [
+            zero_multiple(dict(zip(buffer_dims, strategies))[ax]) for ax in axes
+        ]
+        return window, fill, alloc, multiples
+
+    def _local_buffer(
+        self,
+        schedule: MlirNodeSchedule,
+        sched_state: SchedulingState,
+        operand_idx: int,
+        pad: bool,
+        strategies: PadStrategies | None,
+        *,
+        root: str,
+        buffer_loop: str,
+        tiles_sizes_by_loops: dict[str, list[int]],
+    ) -> None:
+        # The local buffer is allocated with the layout padding (strides only),
+        # then the zero padding is filled and computed on.
+        assert sdist_transform is not None
+        window: list[int] = []
+        fill: list[int] = []
+        alloc: list[int] = []
+        multiples: list[int] = []
+        if pad:
+            window, fill, alloc, multiples = self._buffer_padding(
+                schedule,
+                operand_idx,
+                strategies,
+                root=root,
+                buffer_loop=buffer_loop,
+                tiles_sizes_by_loops=tiles_sizes_by_loops,
+            )
+        sdist_transform.SDistLocalBufferAtOp(
+            target=sched_state.handle,
+            input_idx=operand_idx,
+            pad=alloc if pad else None,
+        )
+        # With ``pad_partial_tiles``, the dynamic window is only zero filled up
+        # to the multiple of the zero divisibility constraints: the rest of the
+        # padding is not computed (the operands are guarded instead)
+        partial = has_pad_partial_tiles(strategies)
+        round_up = partial and any(m > 1 for m in multiples)
+        partial_only = partial and fill == window and not round_up
+        if pad and not partial_only and needs_zero_fill(strategies):
+            # The window can be dynamic (partial last tile): always fill
+            sdist_transform.SDistPadShapeOp(
+                sched_state.handle,
+                operand_idx,
+                sizes=fill,
+                value=0.0,
+                multiples=multiples if round_up else None,
+            )
+        elif pad and has_pad_partial_tiles(strategies):
+            sdist_transform.SDistPadShapeOp(
+                sched_state.handle, operand_idx, sizes=fill
+            )
+
     def _pack_buffer(
         self,
         loop_name: str,
@@ -789,24 +904,20 @@ class MlirProgramInsertTransformPass:
     ):
         with InsertionPoint(transform.ApplyPatternsOp(sched_state.handle).patterns):
             memref.ApplyFoldMemrefAliasOpsPatternsOp()
-        for entry in schedule.packed_buffers[loop_name]:
-            input_idx, pad_by_dim = self._resolve_local_pack_padding(
+        if "sdist" not in self._mlir_program.mlir_extensions:
+            return
+        for input_idx, _, pad in schedule.packed_buffers[loop_name]:
+            strategies = schedule.pack_pad_strategies.get(loop_name, {}).get(input_idx)
+            self._local_buffer(
                 schedule,
-                entry,
+                sched_state,
+                input_idx,
+                pad,
+                strategies,
                 root=root,
-                pack_loop=loop_name,
+                buffer_loop=loop_name,
                 tiles_sizes_by_loops=tiles_sizes_by_loops,
             )
-            if any(slack != 0 for _, slack in pad_by_dim):
-                raise NotImplementedError(
-                    "transform.sdist.local_buffer_at padding is not yet implemented in mlir_sdist"
-                )
-            if "sdist" in self._mlir_program.mlir_extensions:
-                assert sdist_transform is not None
-                sdist_transform.SDistLocalBufferAtOp(
-                    target=sched_state.handle,
-                    input_idx=input_idx,
-                )
 
     def _read_rotate(
         self,
@@ -842,6 +953,9 @@ class MlirProgramInsertTransformPass:
         loop_name: str,
         schedule: MlirNodeSchedule,
         sched_state: SchedulingState,
+        *,
+        root: str,
+        tiles_sizes_by_loops: dict[str, list[int]],
     ):
         from .MlirGraphBackend import MlirGraphBackend
         from .MlirNodeBackend import MlirNodeBackend
@@ -853,10 +967,15 @@ class MlirProgramInsertTransformPass:
         with InsertionPoint(transform.ApplyPatternsOp(sched_state.handle).patterns):
             memref.ApplyFoldMemrefAliasOpsPatternsOp()
         if "sdist" in self._mlir_program.mlir_extensions:
-            assert sdist_transform is not None
-            sdist_transform.SDistLocalBufferAtOp(
-                target=sched_state.handle,
-                input_idx=output_idx,
+            self._local_buffer(
+                schedule,
+                sched_state,
+                output_idx,
+                loop_name in schedule.padded_buffers,
+                schedule.buffer_pad_strategies.get(loop_name),
+                root=root,
+                buffer_loop=loop_name,
+                tiles_sizes_by_loops=tiles_sizes_by_loops,
             )
 
     def _collect_fused_producers(self, unscheduled_handles: set[str | None]):

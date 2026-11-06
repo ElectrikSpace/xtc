@@ -4,10 +4,11 @@
 
 import xtc.graphs.xtc.op as O
 from xtc.backends.mlir.MlirGraphBackend import MlirGraphBackend as Backend
+from xtc.utils.pad import pad_divisible_by, pad_modulo_value
 
 from xtc.runtimes.accelerator.mppa import MppaDevice
 
-I, J, K, dtype = 4, 8, 16, "float32"
+I, J, K, dtype = 6, 8, 16, "float32"
 a = O.tensor((I, K), dtype, name="A")
 b = O.tensor((K, J), dtype, name="B")
 
@@ -22,8 +23,20 @@ impl = Backend(graph)
 sch = impl.get_scheduler()
 sch.define_memory_mesh(axes={"mx": 1, "my": 1})
 sch.define_processor_mesh(axes={"px": 1, "py": 1, "psx": 1, "psy": 1})
-sch.tile("k", {"k1": 4})
-sch.pack_at("k1", 1, pad=True)
+sch.tile("i", {"i1": 8})
+sch.interchange(["k", "j", "i", "i1"])
+# A: i is zero filled to 8 (computed on), k is only padded in the layout
+sch.pack_at(
+    "i",
+    0,
+    pad=True,
+    pad_strategies=[
+        [pad_divisible_by(8, zero=True)],
+        [pad_modulo_value(32, 20)],
+    ],
+)
+# C: default padding, zero filled to the innermost tile of i
+sch.buffer_at("i", pad=True)
 sched = sch.schedule()
 
 mppa = MppaDevice()
@@ -31,14 +44,17 @@ mppa = MppaDevice()
 comp = impl.get_compiler(
     target=mppa,
     shared_lib=False,
-    print_lowered_ir=True,
+    print_transformed_ir=True,
     dump_file="matmul_mlir_mppa_pack_pad",
 )
-try:
-    comp.compile(sched)
-except NotImplementedError as exc:
-    print(f"PACK_PAD_NOT_IMPL: {exc}")
+comp.compile(sched)
+print("COMPILED")
 
 # CHECK:       graph:
 # CHECK-NEXT:    name: matmul
-# CHECK:       PACK_PAD_NOT_IMPL: {{.*}}local_buffer_at{{.*}}
+# CHECK:       memref.alloc() {sdist.pad_fill = array<i64: 8, 16>} : memref<8x20xf32, 2>
+# CHECK:       memref.subview %{{.*}}[0, 0] [6, 16] [1, 1] : memref<8x20xf32, 2>
+# CHECK:       linalg.fill
+# CHECK:       memref.alloc() {sdist.pad_fill = array<i64: 8, 8>} : memref<8x8xf32, 2>
+# CHECK:       linalg.matmul {{.*}} ins({{.*}} : memref<8x16xf32, strided<[20, 1]>, 2>, {{.*}}) outs({{.*}} : memref<8x8xf32, 2>)
+# CHECK:       COMPILED

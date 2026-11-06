@@ -46,6 +46,8 @@ def _check_tile_bounds(schedule: MlirNodeSchedule) -> None:
                 node=schedule.node_name,
                 dimension=dim,
             )
+        if any(name in schedule.padded_tiles for name in tiles):
+            continue
         extent = schedule.dim_sizes[base]
         for name, size in tiles.items():
             if size > extent:
@@ -133,7 +135,11 @@ def _check_interchanges(schedule: MlirNodeSchedule) -> None:
                         continue
                     size = tiles[axis]
                     outer = path_tiles.get(dim)
-                    if outer is not None and size > outer[1]:
+                    if (
+                        outer is not None
+                        and size > outer[1]
+                        and outer[0] not in schedule.padded_tiles
+                    ):
                         raise ScheduleValidationError(
                             f"Inner tile {axis} ({size}) exceeds outer tile "
                             f"{outer[0]} ({outer[1]}).",

@@ -2,12 +2,14 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+import sys
 from typing import cast
 from xdsl.dialects import func as xdslfunc
 from mlir.dialects import func
 from mlir.ir import (
     ArrayAttr,
     Diagnostic,
+    DiagnosticSeverity,
     DictAttr,
     UnitAttr,
     Context,
@@ -36,6 +38,10 @@ class RawMlirProgram:
 
     @classmethod
     def _diagnostic_handler(cls, diag: Diagnostic) -> bool:
+        if diag.severity != DiagnosticSeverity.ERROR:
+            # Remarks and warnings (e.g. sdist.pad_fill) are informative only
+            print(f"MLIR {diag.severity.name.lower()}: {diag}", file=sys.stderr)
+            return True
         raise RuntimeError(f"MLIR Error: {diag}")
 
     def require_extension(self, extension: str, weak: bool = False):

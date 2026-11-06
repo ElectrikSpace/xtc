@@ -8,6 +8,7 @@ from typing import Any
 import xtc.itf as itf
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
 from xtc.schedules.loop_nest import LoopNest, LoopNestNode
+from xtc.utils.pad import PadStrategiesArg
 import xtc.backends.jir as backend
 
 __all__ = [
@@ -302,9 +303,15 @@ class JIRScheduler(itf.schd.Scheduler):
 
     @override
     def buffer_at(
-        self, axis: str, mtype: str | None = None, root: str = DEFAULT_ROOT
+        self,
+        axis: str,
+        mtype: str | None = None,
+        root: str = DEFAULT_ROOT,
+        pad: bool = False,
+        pad_strategies: PadStrategiesArg = None,
     ) -> None:
         assert mtype is None or mtype == "local"
+        assert not pad and not pad_strategies, "this backend does not support padding"
         # TODO: not implemented for now
         pass
 
@@ -316,6 +323,7 @@ class JIRScheduler(itf.schd.Scheduler):
         mtype: str | None = None,
         pad: bool = False,
         root: str = DEFAULT_ROOT,
+        pad_strategies: PadStrategiesArg = None,
     ) -> None:
         assert mtype is None or mtype == "local"
         # TODO: not implemented for now

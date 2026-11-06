@@ -50,7 +50,7 @@ def abstract_extents_after_ancestor_tiles(
         if len(nz) != 1:
             continue
         dim_name, strip = nz[0]
-        extent[dim_name] = int(strip)
+        extent[dim_name] = min(extent[dim_name], int(strip))
     return extent
 
 
