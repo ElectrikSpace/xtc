@@ -8,6 +8,7 @@ from typing import Literal
 from typing_extensions import override
 from dataclasses import dataclass, asdict, field
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
+from xtc.utils.pad import PadStrategiesArg
 from xtc.schedules.loop_names import make_loop_name
 from xtc.schedules.plain_schedule import PlainNodeSchedule, PlainNodeScheduler
 
@@ -90,9 +91,14 @@ class MlirNodeScheduler:
         self._plain_sch.unroll(unrolls, root)
 
     def buffer_at(
-        self, axis: str, mtype: str | None = None, root: str = DEFAULT_ROOT
+        self,
+        axis: str,
+        mtype: str | None = None,
+        root: str = DEFAULT_ROOT,
+        pad: bool = False,
+        pad_strategies: PadStrategiesArg = None,
     ) -> None:
-        self._plain_sch.buffer_at(axis, mtype, root)
+        self._plain_sch.buffer_at(axis, mtype, root, pad, pad_strategies)
 
     def pack_at(
         self,
@@ -101,8 +107,9 @@ class MlirNodeScheduler:
         mtype: str | None = None,
         pad: bool = False,
         root: str = DEFAULT_ROOT,
+        pad_strategies: PadStrategiesArg = None,
     ):
-        self._plain_sch.pack_at(axis, input_idx, mtype, pad, root)
+        self._plain_sch.pack_at(axis, input_idx, mtype, pad, root, pad_strategies)
 
     def define_memory_mesh(self, axes: dict[str, int]):
         self._plain_sch.define_memory_mesh(axes)
@@ -157,7 +164,8 @@ class MlirNodeScheduler:
 
     def get_node_schedule(self) -> MlirNodeSchedule:
         plain_schedule = self._plain_sch.get_plain_schedule()
-        return MlirNodeSchedule(**asdict(plain_schedule), 
+        return MlirNodeSchedule(
+            **asdict(plain_schedule),
             dim_sizes=self._dim_sizes,
             read_rotates=deepcopy(self._read_rotates),
             reduction_dims=self._reduction_dims[:],

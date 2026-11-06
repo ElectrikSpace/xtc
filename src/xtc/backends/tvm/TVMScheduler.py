@@ -13,6 +13,7 @@ import numpy as np
 from copy import deepcopy
 
 from xtc.utils.math import pow2divisor
+from xtc.utils.pad import PadStrategiesArg
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
 from xtc.schedules.plain_schedule import PlainNodeSchedule, PlainNodeScheduler
 from xtc.schedules.loop_nest import LoopNest, LoopNestNode
@@ -347,9 +348,15 @@ class TVMScheduler(itf.schd.Scheduler):
 
     @override
     def buffer_at(
-        self, axis: str, mtype: str | None = None, root: str = DEFAULT_ROOT
+        self,
+        axis: str,
+        mtype: str | None = None,
+        root: str = DEFAULT_ROOT,
+        pad: bool = False,
+        pad_strategies: PadStrategiesArg = None,
     ) -> None:
         assert mtype is None or mtype == "global"
+        assert not pad and not pad_strategies, "this backend does not support padding"
         self._plain_sch.buffer_at(axis, mtype, root)
 
     @override
@@ -360,6 +367,7 @@ class TVMScheduler(itf.schd.Scheduler):
         mtype: str | None = None,
         pad: bool = False,
         root: str = DEFAULT_ROOT,
+        pad_strategies: PadStrategiesArg = None,
     ) -> None:
         assert mtype is None or mtype == "global"
         assert input_idx >= 0 and input_idx < len(self._op.np_inputs_spec())

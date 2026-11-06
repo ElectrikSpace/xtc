@@ -6,6 +6,7 @@ from typing_extensions import override
 
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
 from xtc.schedules.loop_nest import LoopNest
+from xtc.utils.pad import PadStrategiesArg
 from xtc.schedules.loop_nest_builder import LoopNestBuilder
 
 import xtc.itf as itf
@@ -147,8 +148,14 @@ class MlirScheduler(itf.schd.Scheduler):
 
     @override
     def buffer_at(
-        self, axis: str, mtype: str | None = None, root: str = DEFAULT_ROOT
+        self,
+        axis: str,
+        mtype: str | None = None,
+        root: str = DEFAULT_ROOT,
+        pad: bool = False,
+        pad_strategies: PadStrategiesArg = None,
     ) -> None:
+        assert pad or not pad_strategies, "pad_strategies requires pad=True"
         # The current implementation exclusively rely on SDist, but upstream
         # transform dialect may be used for some cases.
         assert mtype is None or mtype == "global" or mtype == "local"
@@ -156,7 +163,11 @@ class MlirScheduler(itf.schd.Scheduler):
             self._require_extension("sdist", weak=True)
         else:
             self._require_extension("sdist")
-        self._current_scheduler.buffer_at(axis, mtype, root=root)
+        if pad:
+            self._require_extension("sdist")
+        self._current_scheduler.buffer_at(
+            axis, mtype, root=root, pad=pad, pad_strategies=pad_strategies
+        )
 
     @override
     def pack_at(
@@ -166,7 +177,9 @@ class MlirScheduler(itf.schd.Scheduler):
         mtype: str | None = None,
         pad: bool = False,
         root: str = DEFAULT_ROOT,
+        pad_strategies: PadStrategiesArg = None,
     ) -> None:
+        assert pad or not pad_strategies, "pad_strategies requires pad=True"
         # The current implementation exclusively rely on SDist, but upstream
         # transform dialect may be used for some cases.
         assert mtype is None or mtype == "global" or mtype == "local"
@@ -174,7 +187,9 @@ class MlirScheduler(itf.schd.Scheduler):
             self._require_extension("sdist", weak=True)
         else:
             self._require_extension("sdist")
-        self._current_scheduler.pack_at(axis, input_idx, mtype, pad, root=root)
+        self._current_scheduler.pack_at(
+            axis, input_idx, mtype, pad, root=root, pad_strategies=pad_strategies
+        )
 
     @override
     def vectorize(
