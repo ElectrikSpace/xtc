@@ -4,6 +4,7 @@
 #
 """Process boundary for native code that can abort the interpreter."""
 
+import logging
 import multiprocessing
 import os
 import pickle
@@ -15,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar, cast
 
-from xtc.errors import XtcError
+from xtc.errors import XtcError, XtcTimeoutError
 
 T = TypeVar("T")
 _stage_file: Path | None = None
@@ -27,6 +28,15 @@ def mark_isolated_stage(stage: str) -> None:
         _stage_file.write_text(stage)
 
 
+def _all_logging_handlers() -> list[logging.Handler]:
+    loggers: list[logging.Logger] = [logging.getLogger()] + [
+        logger
+        for logger in logging.Logger.manager.loggerDict.values()
+        if isinstance(logger, logging.Logger)
+    ]
+    return [handler for logger in loggers for handler in logger.handlers]
+
+
 def _worker(
     operation: Callable[[], T], log: Path, result: Path, stage_file: Path
 ) -> None:
@@ -35,10 +45,21 @@ def _worker(
     _, hard_limit = resource.getrlimit(resource.RLIMIT_CORE)
     resource.setrlimit(resource.RLIMIT_CORE, (0, hard_limit))
     with log.open("wb", buffering=0) as output:
-        sys.stdout.flush()
-        sys.stderr.flush()
         os.dup2(output.fileno(), 1)
         os.dup2(output.fileno(), 2)
+        # Never flush the inherited sys.stdout/sys.stderr: when forked from a
+        # thread pool worker, their locks may be held by another parent thread
+        # (logging, progress bars) and the child would deadlock. Their pending
+        # data belongs to the parent anyway.
+        old_streams = (sys.stdout, sys.stderr, sys.__stdout__, sys.__stderr__)
+        sys.stdout = open(1, "w", buffering=1, closefd=False)
+        sys.stderr = open(2, "w", buffering=1, closefd=False)
+        for handler in _all_logging_handlers():
+            if (
+                isinstance(handler, logging.StreamHandler)
+                and handler.stream in old_streams
+            ):
+                handler.stream = sys.stderr
         try:
             payload: tuple[str, object] = ("result", operation())
         except Exception as exc:
@@ -54,6 +75,9 @@ def _worker(
             pickle.dump(payload, sink)
         sys.stdout.flush()
         sys.stderr.flush()
+    # Skip the interpreter shutdown of the forked process: when forked from a
+    # thread pool worker, joining the inherited (dead) pool threads fails.
+    os._exit(0)
 
 
 def run_isolated(
@@ -61,10 +85,12 @@ def run_isolated(
     *,
     error_type: type[XtcError],
     stage: str,
+    timeout: float | None = None,
 ) -> T:
     """Run native work in a forked process; return only serializable results.
 
     The caller must not depend on changes to in-memory objects in the worker.
+    If `timeout` (seconds) expires, the worker is killed and XtcTimeoutError raised.
     """
     if "fork" not in multiprocessing.get_all_start_methods():
         raise RuntimeError("Native crash isolation requires a fork-capable platform")
@@ -81,7 +107,14 @@ def run_isolated(
         sys.stdout.flush()
         sys.stderr.flush()
         process.start()
-        process.join()
+        process.join(timeout)
+        if process.is_alive():
+            process.kill()
+            process.join()
+            raise XtcTimeoutError(
+                f"Native worker timed out after {timeout:g}s",
+                stage=stage_file.read_text() if stage_file.exists() else stage,
+            )
         code = process.exitcode
         if code is None:
             raise RuntimeError("Native worker did not terminate")
