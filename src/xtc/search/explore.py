@@ -25,15 +25,18 @@ import csv
 import json
 import random
 from datetime import datetime, timezone
+from time import monotonic
 import numpy as np
 import numpy.typing
 import subprocess
 import multiprocessing
+import threading
 from pathlib import Path
 from collections.abc import Sequence, Mapping
 from typing import Any, TypeAlias, cast
 from importlib import import_module
 
+from xtc.errors import XtcTimeoutError
 from xtc.itf.back import Backend
 from xtc.itf.graph import Graph
 from xtc.itf.comp import Module
@@ -56,6 +59,13 @@ from .callback import ResultCallBack, CSVCallback, DBCallback, MemoryCallback
 from .pipeline import CompileExecutePipeline
 
 logger = logging.getLogger(__name__)
+
+# MPPA cluster peak: multiply-accumulates per cycle and per PE, by dtype.
+MPPA_MACS_PER_CYCLE_PER_PE = {"float32": 2 * 2 * 2, "float16": 4 * 8 * 4}
+MPPA_NB_PE = 16
+MPPA_PMU_COUNTER = "mppa.PCC.cluster.0.pe.max"
+MPPA_OOM_MESSAGE = "Not enough space on MPPA"
+MPPA_BOARD_RESET_CMD = "kvx-board-reset"
 
 NPSamples: TypeAlias = numpy.typing.NDArray[np.int64]
 CallBacks: TypeAlias = Mapping[str, Any]
@@ -100,6 +110,9 @@ class ExplorationConfig:
     jobs: int = field(default_factory=lambda: max(1, multiprocessing.cpu_count() // 2))
     execute: bool = True
     peak_flops: float | None = None
+    mppa_counter: str = MPPA_PMU_COUNTER
+    exec_timeout: float = 20.0
+    timeout: float | None = None
     mlir_prefix: str | None = None
     batch: int = 1
     debug_compile: bool = False
@@ -164,6 +177,7 @@ OPERATORS = {
         "operation": "xtc_matmul_graph",
         "backends": {
             "mlir": {},
+            "mppa": {},
             "tvm": {},
             "jir": {},
         },
@@ -212,6 +226,26 @@ class Exploration:
     def __init__(self, config: ExplorationConfig | None = None):
         self.config = config if config is not None else ExplorationConfig()
         self.results: list[Sequence] = []
+        self._mppa_device: Any = None
+        self._mppa_frequency: int | None = None
+        self._mppa_report_lock = threading.Lock()
+        self._mppa_cycles: dict[tuple[str, tuple[int, ...]], float] = {}
+        self._mppa_report: list[tuple[str, str, Sample, str]] = []
+        self._deadline: float | None = None
+        self._timeout_logged = False
+
+    def timed_out(self) -> bool:
+        """True when the global --timeout is reached: no new work is started."""
+        if self._deadline is None or monotonic() < self._deadline:
+            return False
+        if not self._timeout_logged:
+            self._timeout_logged = True
+            logger.warning(
+                "Global timeout of %gs reached: finishing the running execution "
+                "and stopping the exploration",
+                self.config.timeout,
+            )
+        return True
 
     @staticmethod
     def xtc_load_graph(graph_file: str) -> Graph:
@@ -223,15 +257,111 @@ class Exploration:
 
     @staticmethod
     def xtc_matmul_graph(
-        i: int, j: int, k: int, dtype: str, name: str = "matmul"
+        i: int,
+        j: int,
+        k: int,
+        dtype: str,
+        name: str = "matmul",
+        device: Any = None,
     ) -> Graph:
         import xtc.graphs.xtc.op as O
 
-        a = O.tensor((i, k), dtype, name="A")
-        b = O.tensor((k, j), dtype, name="B")
-        with O.graph(name=name) as gb:
-            O.matmul(a, b, name="C")
+        if device is None:
+            a = O.tensor((i, k), dtype, name="A")
+            b = O.tensor((k, j), dtype, name="B")
+            with O.graph(name=name) as gb:
+                O.matmul(a, b, name="C")
+            return gb.graph
+        # MPPA: as in the SDist benchmarks, fp16 uses a constant transposed B
+        # and a fp16 accumulator.
+        a = O.tensor((i, k), dtype, name="A", device=device)
+        if dtype == "float16":
+            b = O.tensor(
+                (k, j), dtype, name="B", const=True, layout=[1, 0], device=device
+            )
+            with O.graph(name=name) as gb:
+                O.matmul(a, b, name="C", dtype="float16", device=device)
+        else:
+            b = O.tensor((k, j), dtype, name="B", device=device)
+            with O.graph(name=name) as gb:
+                O.matmul(a, b, name="C", device=device)
         return gb.graph
+
+    def get_mppa_device(self) -> Any:
+        if self._mppa_device is None:
+            from xtc.runtimes.accelerator.mppa import MppaDevice
+
+            self._mppa_device = MppaDevice()
+        return self._mppa_device
+
+    def record_mppa(self, status: str, ident: str, in_x: Sample, detail: str = ""):
+        """Record the outcome of an MPPA sample: ok, invalid_schedule,
+        compile_error, out_of_memory, execution_error or timeout."""
+        with self._mppa_report_lock:
+            self._mppa_report.append((status, ident, in_x, detail))
+        logger.debug("MPPA %s: %s: %s: %s", status, ident, in_x, detail)
+
+    def mppa_cycles(self, in_x: Sample, backend: str) -> float | None:
+        return self._mppa_cycles.get((backend, tuple(int(v) for v in in_x)))
+
+    def reset_mppa_board(self):
+        logger.warning("Resetting the MPPA board with %s", MPPA_BOARD_RESET_CMD)
+        try:
+            subprocess.run([MPPA_BOARD_RESET_CMD], check=True)
+        except (OSError, subprocess.CalledProcessError) as e:
+            logger.error("Board reset failed: %s", e)
+
+    def print_mppa_report(self):
+        with self._mppa_report_lock:
+            report = list(self._mppa_report)
+        if not report:
+            return
+        statuses = [
+            ("ok", "OK"),
+            ("invalid_schedule", "Invalid schedules"),
+            ("compile_error", "Compiler errors"),
+            ("out_of_memory", "Out of memory (not enough space on MPPA)"),
+            ("execution_error", "Execution errors"),
+            ("timeout", f"Timeouts (> {self.config.exec_timeout:g}s)"),
+        ]
+        print(f"MPPA report: {len(report)} samples", file=sys.stderr)
+        for status, label in statuses:
+            count = sum(1 for r in report if r[0] == status)
+            print(f"  {label}: {count}", file=sys.stderr)
+        if not self.config.output:
+            return
+        report_file = Path(self.config.output).with_suffix(".report.json")
+        with open(report_file, "w") as f:
+            json.dump(
+                {
+                    "counts": {
+                        status: sum(1 for r in report if r[0] == status)
+                        for status, _ in statuses
+                    },
+                    "samples": [
+                        {"status": st, "ident": ident, "X": list(x), "detail": d}
+                        for st, ident, x, d in sorted(report, key=lambda r: r[1])
+                    ],
+                },
+                f,
+                indent=2,
+            )
+        print(f"  Report written to {report_file}", file=sys.stderr)
+
+    def get_mppa_frequency(self) -> int:
+        # Initializing the device in this process would prevent the isolated
+        # compile and execution workers from using it, so query a worker.
+        if self._mppa_frequency is None:
+            from xtc.errors import XtcRuntimeError
+            from xtc.runtimes.accelerator.mppa import MppaDevice
+            from xtc.utils.isolation import run_isolated
+
+            self._mppa_frequency = run_isolated(
+                lambda: int(MppaDevice().frequency),
+                error_type=XtcRuntimeError,
+                stage="MPPA frequency query",
+            )
+        return self._mppa_frequency
 
     @staticmethod
     def xtc_relu_graph(i: int, dtype: str, name: str = "relu") -> Graph:
@@ -355,18 +485,25 @@ class Exploration:
         assert isinstance(in_x, list), f"X not a list: {in_x} ({type(in_x)})"
         logger.debug("Compile: %s: %s: %s...", ident, backend, in_x)
         kwargs = {}
-        if backend == "mlir":
+        if backend in ("mlir", "mppa"):
             kwargs.update({"use_tensor_dialect": args.use_tensors})
+        # The MPPA target is the MLIR backend compiled for the MPPA device
         impl, backend_name = self.graph_implementer(
             graph,
-            backend,
+            "mlir" if backend == "mppa" else backend,
             **kwargs,
         )
-        assert backend_name == backend
+        assert backend_name == ("mlir" if backend == "mppa" else backend)
         scheduler = impl.get_scheduler()
         node_scheduler = scheduler
-        strategy.generate(node_scheduler, in_x)
-        schedule = scheduler.schedule()
+        try:
+            strategy.generate(node_scheduler, in_x)
+            schedule = scheduler.schedule()
+        except Exception as e:
+            if backend != "mppa":
+                raise
+            self.record_mppa("invalid_schedule", ident, in_x, str(e))
+            return (ident, backend, None, dump_file, in_x)
         logger.debug("  Schedule done: %s: %s.", ident, schedule)
         if dump_file is None:
             dump_file = f"{args.explore_dir}/payload_{ident}"
@@ -402,8 +539,28 @@ class Exploration:
                 )
             )
         assert args.eval == "eval"
+        if backend == "mppa":
+            compile_args.update(
+                target=self.get_mppa_device(), mppa_kvx_cc="clang", shared_lib=True
+            )
+            compile_args.pop("bare_ptr", None)
+            compile_args.pop("debug", None)
         compiler = impl.get_compiler(**compile_args)
-        module = compiler.compile(schedule=schedule)
+        if backend == "mppa":
+            try:
+                module = cast(Any, compiler).compile(
+                    schedule=schedule, double_buffering=True
+                )
+            except Exception as e:
+                # The MPPA allocator assertion is a memory overflow, not a
+                # compiler bug, even though it shows up in the stack trace.
+                oom = MPPA_OOM_MESSAGE in str(e)
+                self.record_mppa(
+                    "out_of_memory" if oom else "compile_error", ident, in_x, str(e)
+                )
+                module = None
+        else:
+            module = compiler.compile(schedule=schedule)
         logger.debug("  Compile done: %s: %s.", ident, in_x)
         return (ident, backend, module, dump_file, in_x)
 
@@ -417,6 +574,10 @@ class Exploration:
     ):
         args = self.config
         logger.debug("Evaluate: %s: %s...", ident, in_x)
+        if backend == "mppa":
+            return self.load_and_evaluate_mppa_sample(
+                ident, backend, module, in_x, callbacks
+            )
         evaluator_args = dict(
             repeat=args.repeat,
             number=args.number,
@@ -451,6 +612,59 @@ class Exploration:
                 callback(result)
         return result
 
+    def load_and_evaluate_mppa_sample(
+        self,
+        ident: str,
+        backend: str,
+        module: Module | None,
+        in_x: Sample,
+        callbacks: CallBacks = {},
+    ):
+        """Evaluate on the MPPA, time is given by the --mppa-counter cycles."""
+        args = self.config
+        time = float("inf")
+        if module is not None:
+            payload_lib = Path(module.file_name)
+            try:
+                evaluator = module.get_evaluator(
+                    validate=args.validate,
+                    pmu_counters=["cycles", args.mppa_counter],
+                    timeout=args.exec_timeout,
+                )
+                results, code, error_msg = evaluator.evaluate()
+                # results holds (cycles, mppa counter) per repeat: keep the best
+                cycles = min(results[1::2]) if len(results) > 1 else 0
+                if code == 0 and cycles > 0:
+                    time = cycles / self.get_mppa_frequency()
+                    self._mppa_cycles[(backend, tuple(int(v) for v in in_x))] = cycles
+                    self.record_mppa("ok", ident, in_x)
+                    logger.debug(
+                        "  Evaluated: %s: %s: time: %.2f msecs",
+                        ident,
+                        in_x,
+                        time * 1000,
+                    )
+                else:
+                    code = code or 1
+                    self.record_mppa("execution_error", ident, in_x, str(error_msg))
+            except XtcTimeoutError as e:
+                code = 1
+                self.record_mppa("timeout", ident, in_x, str(e))
+                self.reset_mppa_board()
+            except Exception as e:
+                code = 1
+                self.record_mppa("execution_error", ident, in_x, str(e))
+            if not args.save_temps:
+                for lib in (payload_lib, payload_lib.with_suffix(".kvx.so")):
+                    lib.unlink(missing_ok=True)
+        else:
+            code = 1
+        result = (in_x, code, time, backend)
+        if callbacks and "result" in callbacks:
+            for callback in callbacks["result"]:
+                callback(result)
+        return result
+
     def evaluate_all_parallel(
         self,
         strategy: Strategy,
@@ -464,6 +678,8 @@ class Exploration:
 
         def compile_func(idx_sample: Any) -> Any:
             idx, in_x = idx_sample
+            if self.timed_out():
+                return idx, []
             if idx % jobs == 0:
                 search_callback.compile_batch_start()
             search_callback.compile_job_start()
@@ -483,6 +699,8 @@ class Exploration:
             if not self.config.execute:
                 return None
             idx, comp_result = idx_comp_result
+            if self.timed_out():
+                return []
             if idx % jobs == 0:
                 search_callback.execute_batch_start()
             search_callback.execute_job_start()
@@ -514,7 +732,10 @@ class Exploration:
             callbacks["search"] if "search" in callbacks else SearchProgress(),
         )
         search_callback.batch_start(batch_ntasks)
-        results = pipeline.run(enumerate(x.tolist() for x in all_in_x))
+        payloads = itertools.takewhile(
+            lambda _: not self.timed_out(), enumerate(x.tolist() for x in all_in_x)
+        )
+        results = pipeline.run(payloads)
         search_callback.batch_end()
         if self.config.execute:
             exec_results = [
@@ -541,14 +762,20 @@ class Exploration:
         progress.search_start(args.trials * len(args.backends))
         try:
             for step in range(0, args.trials, args.batch):
+                if self.timed_out():
+                    break
                 size = min(args.batch, args.trials - step)
                 in_x = opt.suggest()[:size]
                 results = self.evaluate_all_parallel(
                     strategy, np.array(in_x), graph, callbacks=callbacks
                 )
                 all_results.extend(results)
+                if len(results) != len(in_x):
+                    # Stopped by the global timeout: observe the evaluated ones
+                    in_x = [res[0] for res in results]
                 peaks = [peak_time / res[-2] for res in results]
-                opt.observe(in_x, peaks)
+                if in_x:
+                    opt.observe(in_x, peaks)
         finally:
             progress.search_end()
         opt.finished()
@@ -708,6 +935,7 @@ class Exploration:
                 sample_names,
                 resume=args.resume,
                 append=args.append,
+                cycles=self.mppa_cycles if "mppa" in args.backends else None,
             )
             callbacks.append(args.csv_callback)
         if args.db_file:
@@ -756,8 +984,16 @@ class Exploration:
         if "tvm" in args.backends:
             os.environ["TVM_NUM_THREADS"] = str(args.threads)
 
-        if args.operator and args.eval == "eval" and args.execute:
+        mppa = "mppa" in args.backends
+        if mppa and len(args.backends) > 1:
+            raise ValueError("the mppa backend cannot be combined with other backends")
+        if args.operator and args.eval == "eval" and args.execute and not mppa:
             self.init_eval_parameters()
+        if mppa and args.execute and args.peak_flops is None:
+            macs = MPPA_MACS_PER_CYCLE_PER_PE.get(args.dtype)
+            assert macs is not None, f"no MPPA peak for type {args.dtype}"
+            # One flop counts for a multiply and an add, as in ops_count
+            args.peak_flops = 2 * macs * MPPA_NB_PE * self.get_mppa_frequency()
         if args.execute and args.peak_flops is None:
             # TODO: get dtype from graph
             args.peak_flops = HostRuntime.get().evaluate_flops(args.dtype)
@@ -783,8 +1019,11 @@ class Exploration:
                 *self.get_dims().values(),
                 self.get_dtype(),
             )
+            op_kwargs: dict[str, Any] = {}
+            if "mppa" in args.backends:
+                op_kwargs.update(device=self.get_mppa_device())
             graph = getattr(self, cast(str, OPERATORS[args.operator]["operation"]))(
-                *op_args, name=args.func_name
+                *op_args, name=args.func_name, **op_kwargs
             )
         else:
             assert args.graph_file is not None
@@ -817,8 +1056,13 @@ class Exploration:
         args.results = list(results or [])
         csv_callback = getattr(args, "csv_callback", None)
         if not args.quiet and csv_callback is not None and len(csv_callback._rows) > 0:
-            ordered = sorted(csv_callback._rows, key=lambda x: x[-3])
-            in_x, time, peak, backend = ordered[0][-4:]
+            # optional trailing extra columns (cycles) follow X, time, peak, backend
+            extra = (
+                len(csv_callback._header) - csv_callback._header.index("backend") - 1
+            )
+            end = len(csv_callback._header) - extra
+            ordered = sorted(csv_callback._rows, key=lambda x: x[end - 3])
+            in_x, time, peak, backend = ordered[0][end - 4 : end]
             print(
                 f"Schedule: {backend}: {in_x}: time: {time * 1000:.2f} msecs, peak perf: {peak * 100:.2f}%"
             )
@@ -895,7 +1139,13 @@ class Exploration:
         if args.seed >= 0:
             np.random.seed(args.seed)
             random.seed(args.seed)
-        self.results = self.optimize()
+        if args.timeout is not None:
+            self._deadline = monotonic() + args.timeout
+        try:
+            self.results = self.optimize()
+        finally:
+            # Also save the report when stopped by an error or an interruption
+            self.print_mppa_report()
         return self.results
 
     def __call__(self) -> list[Sequence]:

@@ -4,15 +4,39 @@
 #
 from __future__ import annotations
 import itertools
+import re
 
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar, Any
 
+from xtc.utils.pad import PadStrategiesArg, resolve_pad_strategies
 from xtc.schedules.loop_nest import LoopNest, LoopNestNode, SplitOrigin
 
 NodeT = TypeVar("NodeT", bound="Node[Any]")
 
 literal = int | str
+
+_BOOL_PARAMETER = re.compile(r"\s*(not\s+)?([A-Za-z_]\w*)\s*")
+
+
+def bool_parameter(param: str) -> tuple[str, bool]:
+    """Split a boolean parameter `x` or `not x` into (x, negated)."""
+    match = _BOOL_PARAMETER.fullmatch(param)
+    if match is None:
+        raise ValueError(
+            f"Invalid boolean parameter {param!r}: expected `name` or `not name`."
+        )
+    return match.group(2), match.group(1) is not None
+
+
+def eval_bool_parameter(
+    param: str, sample: dict[str, int], default: bool | None = None
+) -> bool:
+    """Value of a boolean parameter `x` or `not x` in the sample."""
+    name, negated = bool_parameter(param)
+    if name not in sample and default is not None:
+        return default
+    return bool(sample[name]) != negated
 
 
 @dataclass
@@ -129,6 +153,10 @@ class ParameterLoopNestNode(Node["ParameterLoopNestNode"]):
     fuse_producer_at: dict[str, int] = field(default_factory=dict)
     fuse_consumer_at: list[str] = field(default_factory=list)
     constraints: list[str] = field(default_factory=list)
+    distribute: dict[str, str] = field(default_factory=dict)
+    buffer_pad: dict[str, bool] = field(default_factory=dict)
+    buffer_pad_strategies: dict[str, PadStrategiesArg] = field(default_factory=dict)
+    pack_pad_strategies: dict[str, PadStrategiesArg] = field(default_factory=dict)
     _levels: dict[str, dict[str, literal]] = field(default_factory=dict)
 
     def apply_sample(self, sample: dict[str, int]) -> LoopNestNode:
@@ -162,12 +190,12 @@ class ParameterLoopNestNode(Node["ParameterLoopNestNode"]):
 
         vectorize = self.vectorize
         for a, v in self.vectorize_parameters.items():
-            if sample.get(v, False):
+            if eval_bool_parameter(v, sample, default=False):
                 vectorize.append(a)
 
         parallelize = self.parallelize
         for a, v in self.parallelize_parameters.items():
-            if sample.get(v, False):
+            if eval_bool_parameter(v, sample, default=False):
                 parallelize.append(a)
 
         unroll = {
@@ -177,15 +205,15 @@ class ParameterLoopNestNode(Node["ParameterLoopNestNode"]):
 
         buffer_at = self.buffer_at.copy()
         for a, v in self.buffer_parameters.items():
-            if not sample.get(v, True):
+            if not eval_bool_parameter(v, sample, default=True):
                 buffer_at.pop(a)
 
         pack_at = {
-            a: (a1, a2, bool(sample[a3]) if isinstance(a3, str) else a3)
+            a: (a1, a2, eval_bool_parameter(a3, sample) if isinstance(a3, str) else a3)
             for a, (a1, a2, a3) in self.pack_at.items()
         }
         for a, v in self.pack_parameters.items():
-            if not sample.get(v, True):
+            if not eval_bool_parameter(v, sample, default=True):
                 pack_at.pop(a)
 
         fuse_producer_at = self.fuse_producer_at
@@ -210,6 +238,16 @@ class ParameterLoopNestNode(Node["ParameterLoopNestNode"]):
             pack_at=pack_at,
             fuse_producer_at=fuse_producer_at,
             fuse_consumer_at=fuse_consumer_at,
+            distribute=dict(self.distribute),
+            buffer_pad=dict(self.buffer_pad),
+            buffer_pad_strategies={
+                a: resolve_pad_strategies(v, sample)
+                for a, v in self.buffer_pad_strategies.items()
+            },
+            pack_pad_strategies={
+                a: resolve_pad_strategies(v, sample)
+                for a, v in self.pack_pad_strategies.items()
+            },
             children=children,
             split_origin=split_origin,
         )
@@ -441,10 +479,14 @@ class ParameterLoopNest:
     Attributes:
         abstract_dims: List of abstract dimension names for the loop nest.
         root_node: The root node of the loop nest tree, or None if empty.
+        enumerate_vars: Parameters drawn uniformly outside of the sampler.
     """
 
     abstract_dims: list[str]
     root_node: ParameterLoopNestNode | None = None
+    memory_mesh: dict[str, literal] = field(default_factory=dict)
+    processor_mesh: dict[str, literal] = field(default_factory=dict)
+    enumerate_vars: list[str] = field(default_factory=list)
 
     @property
     def nodes(self) -> list[ParameterLoopNestNode]:
@@ -472,7 +514,18 @@ class ParameterLoopNest:
         root_node = (
             self.root_node.apply_sample(sample) if self.root_node is not None else None
         )
-        return LoopNest(self.abstract_dims, root_node)
+        return LoopNest(
+            self.abstract_dims,
+            root_node,
+            memory_mesh={
+                a: sample[v] if isinstance(v, str) else v
+                for a, v in self.memory_mesh.items()
+            },
+            processor_mesh={
+                a: sample[v] if isinstance(v, str) else v
+                for a, v in self.processor_mesh.items()
+            },
+        )
 
     def collect_constraints(self) -> list[str]:
         constraints = []

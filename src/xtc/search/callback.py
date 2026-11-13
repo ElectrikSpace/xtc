@@ -4,7 +4,7 @@
 #
 from abc import ABC, abstractmethod
 from typing_extensions import override
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 import json
 import csv
@@ -86,11 +86,15 @@ class CSVCallback(ResultCallBack):
         *,
         resume: bool = False,
         append: bool = False,
+        cycles: Callable[[Sample, str], float | None] | None = None,
     ) -> None:
         self._fname = fname
+        self._cycles = cycles
         self._peak_time = peak_time
         self._sample_names = sample_names
         self._header = sample_names + ["X", "time", "peak", "backend"]
+        if cycles is not None:
+            self._header.append("cycles")
         self._results: list[Sequence] = []
         self._rows: list[Sequence] = []
         self._seen_keys: set[tuple[str, tuple[int, ...]]] = set()
@@ -160,6 +164,8 @@ class CSVCallback(ResultCallBack):
         s = str(x).replace(",", ";")
         row = [s, time, peak, backend]
         row = x + row
+        if self._cycles is not None:
+            row.append(self._cycles(x, backend))
         logger.debug(f"Record row: {row}")
         self._write_row(row)
         self._seen_keys.add(key)

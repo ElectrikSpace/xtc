@@ -9,6 +9,7 @@ from typing_extensions import override
 from collections.abc import Sequence, Mapping, Iterator, Generator
 import itertools
 import numpy as np
+import random
 import re
 
 from xtc.itf.graph import Graph
@@ -1031,6 +1032,7 @@ try:
 
     class Strategy_Descript(Strategy):
         _FP_PATTERN = re.compile(r"footprint\((\w*),\s*(\w*)\)")
+        _DOMAIN_PATTERN = re.compile(r"^\s*(\w+)\s+in\s*\{([^{}]*)\}\s*$")
 
         def __init__(
             self,
@@ -1090,10 +1092,145 @@ try:
             self._constraints = (
                 constraints + input_constraints if constraints else input_constraints
             )
+            self._enum_domains = self._extract_enumerations(loop_nest.enumerate_vars)
             self._footprints(tensors, accesses)
+            self._singletons = self._extract_singletons()
+            self._size_constants()
             self._initialized = False
             if initialize:
                 self._initialize()
+
+        def _extract_enumerations(self, names: list[str]) -> dict[str, list[int]]:
+            # Remove the enumerated parameters from the sampler: their domain
+            # constraints (`x in {...}`) are dropped and they are drawn uniformly
+            # after each sampler draw (see sample_once).
+            domains: dict[str, list[int]] = {}
+            for name in names:
+                domain: set[int] | None = None
+                remaining: list[str] = []
+                for constraint in self._constraints:
+                    match = self._DOMAIN_PATTERN.match(constraint)
+                    if match and match.group(1) == name:
+                        values = {
+                            int(v) for v in match.group(2).split(",") if v.strip()
+                        }
+                        domain = values if domain is None else domain & values
+                    else:
+                        remaining.append(constraint)
+                if domain is None:
+                    raise ValueError(
+                        f"Enumerated parameter {name} has no domain constraint"
+                        f" `{name} in {{...}}`."
+                    )
+                if not domain:
+                    raise ValueError(f"Enumerated parameter {name} has empty domain.")
+                used = [c for c in remaining if re.search(rf"\b{name}\b", c)]
+                if used:
+                    raise ValueError(
+                        f"Enumerated parameter {name} cannot appear in other"
+                        f" constraints: {used}"
+                    )
+                self._constraints = remaining
+                domains[name] = sorted(domain)
+            return domains
+
+        _KEYWORDS = {"in", "not", "and", "or", "True", "False"}
+
+        def _extract_singletons(self) -> dict[str, int]:
+            # Remove the parameters with a single value (`x in {v}`) from the
+            # sampler: v is substituted in the other constraints and x=v is added
+            # to each sampler draw (see sample_once).
+            domains: dict[str, set[int]] = {}
+            for constraint in self._constraints:
+                match = self._DOMAIN_PATTERN.match(constraint)
+                if not match:
+                    continue
+                try:
+                    values = {int(v) for v in match.group(2).split(",") if v.strip()}
+                except ValueError:
+                    continue
+                name = match.group(1)
+                domains[name] = domains[name] & values if name in domains else values
+            singletons = {n: next(iter(d)) for n, d in domains.items() if len(d) == 1}
+            if not singletons:
+                return {}
+
+            def substitute(constraint: str) -> str:
+                return re.sub(
+                    r"\b[A-Za-z_]\w*\b",
+                    lambda m: str(singletons.get(m.group(0), m.group(0))),
+                    constraint,
+                )
+
+            functions = set(self._functions or {})
+            kept: set[str] = set()  # singletons left to the sampler
+            remaining: list[str] = []
+            for constraint in self._constraints:
+                match = self._DOMAIN_PATTERN.match(constraint)
+                if match and match.group(1) in singletons:
+                    continue
+                names = set(re.findall(r"\b[A-Za-z_]\w*\b", constraint))
+                used = names & set(singletons)
+                if not used:
+                    remaining.append(constraint)
+                    continue
+                # The sampler needs variables in assignments and tuple sets
+                if ":=" in constraint or re.match(r"^\s*\(", constraint):
+                    kept |= used
+                    remaining.append(constraint)
+                    continue
+                substituted = substitute(constraint)
+                if names - set(singletons) - self._KEYWORDS - functions:
+                    remaining.append(substituted)
+                    continue
+                result = None if names & functions else self._eval_constant(substituted)
+                if result is None:
+                    kept |= used
+                    remaining.append(constraint)
+                elif not result:
+                    raise ValueError(
+                        f"Constraint {constraint} is false with {substituted}."
+                    )
+            remaining += [f"{n} in {{{singletons[n]}}}" for n in sorted(kept)]
+            self._constraints = remaining
+            return singletons
+
+        @staticmethod
+        def _eval_constant(constraint: str) -> bool | None:
+            """Evaluate a constraint without variables, None if not supported."""
+            env: dict[str, Any] = {"__builtins__": {}}
+            try:
+                if "||" not in constraint:
+                    return bool(eval(constraint, env))
+                # Divisibility chain: [l <=] a || b || ... || z [<= u]
+                tokens = [t.strip() for t in constraint.split("||")]
+                cmp = re.compile(r"<=|<|>=|>|==")
+                values: list[Any] = []
+                for idx, token in enumerate(tokens):
+                    parts = cmp.split(token)
+                    if len(parts) > 1:
+                        if 0 < idx < len(tokens) - 1 or not eval(token, env):
+                            return None if 0 < idx < len(tokens) - 1 else False
+                        token = parts[-1] if idx == 0 else parts[0]
+                    values.append(eval(token, env))
+                for a, b in zip(values, values[1:]):
+                    divisors = a if isinstance(a, set) else {a}
+                    multiples = b if isinstance(b, set) else {b}
+                    if any(y % x != 0 for x in divisors for y in multiples):
+                        return False
+                return True
+            except Exception:
+                return None
+
+        def _size_constants(self):
+            # Expose the axes sizes (e.g. I, J, K) to the constraints that use them
+            for op_axis, axis in zip(self._op.dims, self._axes):
+                name = axis.upper()
+                size = self._sizes.get(op_axis)
+                if size is None:
+                    continue
+                if any(re.search(rf"\b{name}\b", c) for c in self._constraints):
+                    self._constraints.insert(0, f"{name} := {size}")
 
         def _footprints(
             self, tensors: list[str], accesses: tuple[tuple[str, ...], ...]
@@ -1137,9 +1274,13 @@ try:
             if self._initialized:
                 return
             if not self._constraints:
+                self._sample_names = sorted(
+                    set(self._enum_domains) | set(self._singletons)
+                )
                 self._initialized = True
                 return
             context = Context(functions=self._functions)
+            print(list(self._constraints))
             constraints, self.constants = constraints_from_str(
                 list(self._constraints), context=context
             )
@@ -1147,7 +1288,9 @@ try:
             methods = solve_with_z3(list(context.variables), properties, constraints)
             enumerations = execute_static(methods, properties, constraints)
             self._context = context
-            self._sample_names = sorted(list(context.variables))
+            self._sample_names = sorted(
+                set(context.variables) | set(self._enum_domains) | set(self._singletons)
+            )
             self._properties = properties
             self._z3_constraints = constraints
             self._methods = methods
@@ -1175,14 +1318,19 @@ try:
         def sample_once(self, num: int) -> list[Sample]:
             self._initialize()
             if not self._constraints:
-                return [{}]
-            draw = execute_dynamic(
-                self._methods,
-                self._properties,
-                self._z3_constraints,
-                self._enumerations,
-                k=num,
-            )
+                draw: list[Sample] = [{}]
+            else:
+                draw = execute_dynamic(
+                    self._methods,
+                    self._properties,
+                    self._z3_constraints,
+                    self._enumerations,
+                    k=num,
+                )
+            for d in draw:
+                for name, domain in self._enum_domains.items():
+                    d[name] = random.choice(domain)
+                d.update(self._singletons)
             return draw
 
         def pretty_print_methods(self, tab: str = "\t"):

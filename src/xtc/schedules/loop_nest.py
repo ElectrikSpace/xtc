@@ -7,6 +7,8 @@ from __future__ import annotations
 from typing import Generic, TypeVar
 from dataclasses import dataclass, field
 
+from xtc.utils.pad import PadStrategiesArg
+
 from .exceptions import ScheduleValidationError
 
 
@@ -119,6 +121,10 @@ class LoopNestNode(Node["LoopNestNode"]):
     fuse_producer_at: dict[str, int] = field(default_factory=dict)
     fuse_consumer_at: list[str] = field(default_factory=list)
     external_at: dict[str, str] = field(default_factory=dict)
+    distribute: dict[str, str] = field(default_factory=dict)
+    buffer_pad: dict[str, bool] = field(default_factory=dict)
+    buffer_pad_strategies: dict[str, PadStrategiesArg] = field(default_factory=dict)
+    pack_pad_strategies: dict[str, PadStrategiesArg] = field(default_factory=dict)
 
     def pretty_print(self, indent: int = 0) -> str:
         """Return a human-readable representation of the loop nest.
@@ -349,6 +355,8 @@ class LoopNest:
 
     abstract_dims: list[str]
     root_node: LoopNestNode | None = None
+    memory_mesh: dict[str, int] = field(default_factory=dict)
+    processor_mesh: dict[str, int] = field(default_factory=dict)
 
     @property
     def nodes(self) -> list[LoopNestNode]:

@@ -117,7 +117,7 @@ def main():
         "--backends",
         type=str,
         nargs="+",
-        choices=["mlir", "tvm", "jir"],
+        choices=["mlir", "tvm", "jir", "mppa"],
         default=defaults.backends,
         help="backends to use",
     )
@@ -161,7 +161,7 @@ def main():
         "--dtype",
         type=str,
         default=defaults.dtype,
-        choices=["float32", "float64"],
+        choices=["float16", "float32", "float64"],
         help="data type, default to operator's default",
     )
     parser.add_argument(
@@ -273,6 +273,25 @@ def main():
         "--peak-flops",
         type=float,
         help="machine peak flops (flop/sec) for the dtype, or estimated",
+    )
+    parser.add_argument(
+        "--mppa-counter",
+        type=str,
+        default=defaults.mppa_counter,
+        help="MPPA PMU counter used as cycles count",
+    )
+    parser.add_argument(
+        "--exec-timeout",
+        type=float,
+        default=defaults.exec_timeout,
+        help="MPPA execution timeout in seconds, the board is reset when hit",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=defaults.timeout,
+        help="global exploration timeout in seconds: when reached, wait for the"
+        " running execution, skip the remaining trials and save the results",
     )
     parser.add_argument(
         "--mlir-prefix", type=str, help="MLIR install prefix, defaults to mlir package"

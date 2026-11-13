@@ -193,6 +193,7 @@ class SDistBaseStrategy(Strategy):
     @abstractmethod
     def _filter(self, samples: Iterator[VecSample]) -> Iterator[VecSample]: ...
 
+
 class Strategy_SDist_Simple(SDistBaseStrategy):
     """Strategy for Simple SDist schedule without distribution.
 
@@ -252,9 +253,7 @@ class Strategy_SDist_Broadcast(SDistBaseStrategy):
     """Five-cluster matmul with both inputs packed at the broadcast tile."""
 
     def __init__(self, graph: Graph, **kwargs: Any) -> None:
-        super().__init__(
-            graph, ["i0", "j0", "i1", "j1", "iu", "ju"], **kwargs
-        )
+        super().__init__(graph, ["i0", "j0", "i1", "j1", "iu", "ju"], **kwargs)
         sizes = self._constant_sizes()
         if len(sizes) != 3:
             raise ValueError("Broadcast requires a three-dimensional matmul")
@@ -267,10 +266,7 @@ class Strategy_SDist_Broadcast(SDistBaseStrategy):
         choices = self._independents()
         if (
             len(in_x) != len(self.sample_names)
-            or any(
-                [value] not in options
-                for value, options in zip(in_x, choices)
-            )
+            or any([value] not in options for value, options in zip(in_x, choices))
             or not any(self._filter(iter([in_x])))
         ):
             raise ValueError(f"invalid Broadcast sample: {in_x}")
@@ -283,9 +279,7 @@ class Strategy_SDist_Broadcast(SDistBaseStrategy):
         ):
             for name, size in tiles:
                 sch.tile(dim, {name: size})
-        sch.interchange(
-            ["i", "j", "i0", "j0", "i1", "j1", "iu", "ju", "iv", "jv", "k"]
-        )
+        sch.interchange(["i", "j", "i0", "j0", "i1", "j1", "iu", "ju", "iv", "jv", "k"])
         sch.pack_at("j0", 0)
         sch.pack_at("j0", 1)
         sch.distribute("i", "px")
@@ -328,19 +322,25 @@ class Strategy_SDist_Broadcast(SDistBaseStrategy):
         i, j, _ = self._constant_sizes().values()
 
         def largest_divisor(size: int, limit: int) -> int:
-            return max(tile for tile in (8, 16, 32, 64, 128, 256)
-                       if tile <= min(size, limit) and size % tile == 0)
+            return max(
+                tile
+                for tile in (8, 16, 32, 64, 128, 256)
+                if tile <= min(size, limit) and size % tile == 0
+            )
 
         i0 = largest_divisor(i, 128)
         j0 = largest_divisor(j, 256)
         return [
-            i0, j0, i0, j0,
+            i0,
+            j0,
+            i0,
+            j0,
             largest_divisor(i0, min(32, i0 // 4)),
             largest_divisor(j0, min(32, j0 // 4)),
         ]
 
 
-#class Strategy_GOTO(BaseStrategy):
+# class Strategy_GOTO(BaseStrategy):
 #    """Strategy for Goto tiling with vectorisation.
 #
 #    Each tiling parameter is free when exploring exhausive samples.
@@ -410,6 +410,7 @@ class Strategy_SDist_Broadcast(SDistBaseStrategy):
 #            if idiv and jdiv and kdiv:
 #                schedule = [1, itile, 1, jtile, ktile, 2, 1, 1]
 #        return schedule
+
 
 class SDistStrategies:
     _map: dict[str, SDistStrategyRegistration] = {}

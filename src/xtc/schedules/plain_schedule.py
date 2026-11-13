@@ -206,7 +206,9 @@ class PlainNodeScheduler:
 
     def _pad_partial_tiles(self) -> bool:
         all_strategies = [
-            s for by_input in self.pack_pad_strategies.values() for s in by_input.values()
+            s
+            for by_input in self.pack_pad_strategies.values()
+            for s in by_input.values()
         ] + list(self.buffer_pad_strategies.values())
         return any(has_pad_partial_tiles(s) for s in all_strategies)
 

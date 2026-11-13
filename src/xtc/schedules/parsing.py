@@ -5,10 +5,18 @@
 from __future__ import annotations
 
 from typing import Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 import yaml
 from typing_extensions import override
+
+from xtc.utils.pad import (
+    PadConstraint,
+    PadStrategiesArg,
+    pad_divisible_by,
+    pad_modulo_value,
+    pad_partial_tiles,
+)
 
 from .exceptions import ScheduleParseError
 
@@ -16,7 +24,67 @@ literal = int | str
 ansor_tile = "PRTUOWF"
 tup_list = list[tuple[str, Any]]
 CONSTRAINTS = "constraints"
+ENUMERATE = "enumerate"
 SCHEDULE = "schedule"
+MEMORY_MESH = "memory_mesh"
+PROCESSOR_MESH = "processor_mesh"
+TENSOR_PAD_STRATEGIES = re.compile(r"pad_strategies\((\w+)\)")
+_PAD_CONSTRAINT_PATTERN = re.compile(
+    r"^\s*(div|mod)\(\s*(\d+)\s*(?:,\s*(\w+)\s*)?\)\s*$"
+)
+
+
+def parse_pad_strategies(param: Any, where: str) -> PadStrategiesArg:
+    """Normalize pad strategies: one constraint or list of constraints per dim.
+
+    A constraint is a dict as built by `xtc.utils.pad`, or a string
+    `div(N)`, `mod(M, V)`, or `full_tile`. Strings may contain multiple
+    comma-separated constraints. In `mod(M, V)`, V may be a sample parameter
+    name, resolved when the sample is applied.
+    """
+    if param is None:
+        return None
+    if not isinstance(param, (list, tuple)):
+        raise ScheduleParseError(
+            f"`pad_strategies` on {where} should be a list (one entry per dimension)."
+        )
+
+    def constraint(c: Any) -> PadConstraint:
+        if isinstance(c, dict):
+            return c
+        if isinstance(c, str) and c.strip() == "full_tile":
+            return pad_partial_tiles.copy()
+        match = _PAD_CONSTRAINT_PATTERN.match(c) if isinstance(c, str) else None
+        if match is None:
+            raise ScheduleParseError(
+                f"Invalid pad constraint {c!r} on {where}: expected a dict, "
+                "'div(N)', 'mod(M, V)' or 'full_tile'."
+            )
+        kind, a, b = match.groups()
+        if kind == "div" and b is None and int(a) > 0:
+            return pad_divisible_by(int(a))
+        if kind == "mod" and b is not None:
+            if not b.isdigit():
+                return {"type": "modulo_constraint", "args": [int(a), b], "zero": False}
+            if 0 <= int(b) < int(a):
+                return pad_modulo_value(int(a), int(b))
+        raise ScheduleParseError(f"Invalid pad constraint {c!r} on {where}.")
+
+    def constraints(value: Any) -> list[PadConstraint]:
+        if isinstance(value, str):
+            if not value.strip():
+                return []
+            return [constraint(c) for c in re.split(r",(?![^()]*\))", value)]
+        return [constraint(value)]
+
+    out: PadStrategiesArg = []
+    for dim in param:
+        if isinstance(dim, (list, tuple)):
+            out.append([c for value in dim for c in constraints(value)])
+        else:
+            parsed = constraints(dim)
+            out.append(parsed[0] if len(parsed) == 1 else parsed)
+    return out
 
 
 def toliteral(s: str) -> literal:
@@ -32,19 +100,31 @@ def pre_parse(s: dict[str, Any] | tup_list | list[dict[str, Any]]) -> tup_list:
         if SCHEDULE in s:
             if CONSTRAINTS in s:
                 out = [(CONSTRAINTS, s[CONSTRAINTS])]
-            if not set(s.keys()) <= {CONSTRAINTS, SCHEDULE}:
+            if ENUMERATE in s:
+                out.append((ENUMERATE, s[ENUMERATE]))
+            if not set(s.keys()) <= {CONSTRAINTS, ENUMERATE, SCHEDULE}:
                 raise ScheduleParseError(
-                    f"Parsed entries other than schedule and constraints in spec:\n{s}"
+                    "Parsed entries other than schedule, constraints and enumerate"
+                    f" in spec:\n{s}"
                 )
             return out + pre_parse(s[SCHEDULE])
-        return [(k, _pre_parse(v)) for k, v in s.items()]
+        return [(k, _pre_parse_value(k, v)) for k, v in s.items()]
     for s_ in s:
         if isinstance(s_, dict):
-            out += [(k, _pre_parse(v)) for k, v in s_.items()]
+            out += [(k, _pre_parse_value(k, v)) for k, v in s_.items()]
         else:
             k, v = s_
-            out.append((k, _pre_parse(v)))
+            out.append((k, _pre_parse_value(k, v)))
     return out
+
+
+def _pre_parse_value(k: str, v: Any) -> Any:
+    # pad_strategies is a literal list of lists, not a nested schedule
+    return (
+        v
+        if k == "pad_strategies" or TENSOR_PAD_STRATEGIES.fullmatch(k)
+        else _pre_parse(v)
+    )
 
 
 def _pre_parse(v: Any) -> Any:
@@ -74,6 +154,9 @@ class Annotations:
         pack_specified: True if pack was explicitly requested.
         fuse_producer: the input_idx for the operand to fuse, None if not requested.
         fuse_consumer: True if consumer fusion was requested.
+        distribute: name of the processor axis the loop is distributed on.
+        pad_strategies: padding constraints for the pack/buffer of the loop.
+        buffer_pad: True if the buffer of the loop is padded.
     """
 
     MARKER = "$"
@@ -84,6 +167,8 @@ class Annotations:
         "buffer",
         "pack",
         "pad",
+        "pad_strategies",
+        "distribute",
         "interchange",
         "level",
         "partial",
@@ -104,6 +189,9 @@ class Annotations:
     level: str = ""
     partial: bool = False
     full: bool = False
+    distribute: str = ""
+    pad_strategies: PadStrategiesArg = None
+    buffer_pad: bool = False
 
     @classmethod
     def is_annotation(cls, decl: str):
@@ -186,6 +274,8 @@ class ScheduleSpec:
 @dataclass()
 class ScheduleParser:
     """Parses a dict-based schedule specification into an AST."""
+
+    tensor_pad_strategies: dict[literal, PadStrategiesArg] = field(default_factory=dict)
 
     _SPLIT_PATTERN = re.compile(r"^(.*)\[(-\w+|\w*)?:(-\w+|\w*)?\]$")
     _SPLIT_MIDDLE_PATTERN = re.compile(r"^(.*)\[:(\w*):\]$")
@@ -285,6 +375,9 @@ class ScheduleParser:
         level: str = ""
         partial = False
         full = False
+        distribute = ""
+        pad: bool | str | None = None
+        pad_strategies: PadStrategiesArg = None
 
         for key, param in value:
             match key:
@@ -348,12 +441,15 @@ class ScheduleParser:
                         )
                     fuse_consumer = param
                 case "pad":
-                    if pack is None:
+                    pad = True if param is None else param
+                case "pad_strategies":
+                    pad_strategies = parse_pad_strategies(param, declaration)
+                case "distribute":
+                    if not isinstance(param, str):
                         raise ScheduleParseError(
-                            f"pad annotation before/without pack on {declaration}: {key}"
+                            f'`{{"distribute" = {param}}}`: distribute parameter should be a processor axis name.'
                         )
-                    declaration_, mtype_, pad_ = pack
-                    pack = (declaration_, mtype_, param)
+                    distribute = param
                 case "interchange":
                     if param is None:
                         interchange = "interchange"
@@ -385,6 +481,27 @@ class ScheduleParser:
                 f"{declaration} has both annotations full and partial"
             )
 
+        if pad_strategies is None and pack is not None:
+            pad_strategies = self.tensor_pad_strategies.get(pack[0])
+
+        if pad is None and pad_strategies is not None:
+            pad = True
+        buffer_pad = False
+        if pad is not None or pad_strategies is not None:
+            if pack is not None:
+                declaration_, mtype_, pad_ = pack
+                pack = (declaration_, mtype_, pad_ if pad is None else pad)
+            elif buffer_specified:
+                if not isinstance(pad, bool | None):
+                    raise ScheduleParseError(
+                        f"pad on the buffer of {declaration} should be a boolean."
+                    )
+                buffer_pad = pad is not False
+            else:
+                raise ScheduleParseError(
+                    f"pad annotation without pack or buffer on {declaration}"
+                )
+
         return Annotations(
             unroll_factor=unroll_factor,
             unroll_specified=unroll_specified,
@@ -400,6 +517,9 @@ class ScheduleParser:
             level=level,
             partial=partial,
             full=full,
+            distribute=distribute,
+            pad_strategies=pad_strategies,
+            buffer_pad=buffer_pad,
         )
 
     def _parse_pack_param(
@@ -478,7 +598,10 @@ class YAMLParser:
         """Parses a dict YAML specification into a schedule specification."""
         descript_spec: tup_list = []
         for a, v in spec:
-            if a == CONSTRAINTS:
+            if a in (CONSTRAINTS, ENUMERATE):
+                descript_spec.append((a, v))
+                continue
+            if TENSOR_PAD_STRATEGIES.fullmatch(a):
                 descript_spec.append((a, v))
                 continue
             if isinstance(v, str):

@@ -6,14 +6,17 @@ from math import factorial
 from typing import Any
 from dataclasses import dataclass, field
 from copy import deepcopy
+import re
 
 from xtc.itf.schd.scheduler import Scheduler
+from xtc.utils.pad import PadStrategiesArg
 
 from xtc.schedules.loop_nest import LoopNest, LoopNestNode
 from xtc.schedules.parameter_loop_nest import (
     ParameterLoopNest,
     ParameterLoopNestNode,
     ParameterSplitOrigin,
+    bool_parameter,
 )
 
 from .exceptions import ScheduleInterpretError, ScheduleParseError
@@ -31,6 +34,11 @@ from .parsing import (
     ansor_tile,
     tup_list,
     pre_parse,
+    ENUMERATE,
+    MEMORY_MESH,
+    PROCESSOR_MESH,
+    TENSOR_PAD_STRATEGIES,
+    parse_pad_strategies,
 )
 
 
@@ -461,6 +469,9 @@ class ScheduleInterpreter:
                 partial=item.annotations.partial,
                 full=item.annotations.full,
                 level=level + "_" + axis if level else "",
+                distribute=item.annotations.distribute if last_axis else "",
+                pad_strategies=item.annotations.pad_strategies,
+                buffer_pad=item.annotations.buffer_pad,
             )
 
         def _interpret(axis: str, annotations: Annotations):
@@ -583,6 +594,14 @@ class ScheduleInterpreter:
                 f"Axis {axis} is not a defined axis (defined axis: {self.abstract_dims})."
             )
 
+    @staticmethod
+    def _bool_name(param: str) -> str:
+        """Variable name of a boolean parameter `x` or `not x`."""
+        try:
+            return bool_parameter(param)[0]
+        except ValueError as e:
+            raise ScheduleInterpretError(str(e)) from e
+
     def _apply_annotations(
         self,
         item: TileDecl | AxisDecl | AnnotationsDecl,
@@ -618,14 +637,18 @@ class ScheduleInterpreter:
         if annotations.vectorize:
             if isinstance(annotations.vectorize, str):
                 node.vectorize_parameters[loop_name] = annotations.vectorize
-                node.constraints.append(f"{annotations.vectorize} in {{0, 1}}")
+                node.constraints.append(
+                    f"{self._bool_name(annotations.vectorize)} in {{0, 1}}"
+                )
             else:
                 node.vectorize.append(loop_name)
 
         if annotations.parallelize:
             if isinstance(annotations.parallelize, str):
                 node.parallelize_parameters[loop_name] = annotations.parallelize
-                node.constraints.append(f"{annotations.parallelize} in {{0, 1}}")
+                node.constraints.append(
+                    f"{self._bool_name(annotations.parallelize)} in {{0, 1}}"
+                )
             else:
                 node.parallelize.append(loop_name)
 
@@ -635,8 +658,14 @@ class ScheduleInterpreter:
                 raise ScheduleInterpretError(f"Level {level} used multiple times.")
             self._levels[level] = {k: None for k in self.abstract_dims}
 
+        if annotations.distribute:
+            node.distribute[loop_name] = annotations.distribute
+
         if annotations.buffer_specified:
             node.buffer_at[loop_name] = annotations.buffer
+            if annotations.buffer_pad:
+                node.buffer_pad[loop_name] = True
+                node.buffer_pad_strategies[loop_name] = annotations.pad_strategies
 
         if annotations.pack_specified and annotations.pack is not None:
             input_matrix, mtype, pad = annotations.pack
@@ -645,28 +674,39 @@ class ScheduleInterpreter:
                 # Write buffer
                 if idx == len(self.abstract_matrix) - 1:
                     node.buffer_at[loop_name] = mtype
+                    if pad is True:
+                        node.buffer_pad[loop_name] = True
+                        node.buffer_pad_strategies[loop_name] = (
+                            annotations.pad_strategies
+                        )
                     if isinstance(annotations.pack_specified, str):
                         node.buffer_parameters[loop_name] = annotations.pack_specified
                         node.constraints.append(
-                            f"{annotations.pack_specified} in {{0, 1}}"
+                            f"{self._bool_name(annotations.pack_specified)} in {{0, 1}}"
                         )
                 # Read buffer
                 else:
                     node.pack_at[loop_name] = (idx, mtype, pad)
+                    if annotations.pad_strategies is not None:
+                        node.pack_pad_strategies[loop_name] = annotations.pad_strategies
                     if isinstance(annotations.pack_specified, str):
                         node.pack_parameters[loop_name] = annotations.pack_specified
                         node.constraints.append(
-                            f"{annotations.pack_specified} in {{0, 1}}"
+                            f"{self._bool_name(annotations.pack_specified)} in {{0, 1}}"
                         )
                     if isinstance(pad, str):
-                        node.constraints.append(f"{pad} in {{0,1}}")
+                        node.constraints.append(f"{self._bool_name(pad)} in {{0, 1}}")
             else:
                 node.pack_at[loop_name] = (input_matrix, mtype, pad)
+                if annotations.pad_strategies is not None:
+                    node.pack_pad_strategies[loop_name] = annotations.pad_strategies
                 if isinstance(annotations.pack_specified, str):
                     node.pack_parameters[loop_name] = annotations.pack_specified
-                    node.constraints.append(f"{annotations.pack_specified} in {{0, 1}}")
+                    node.constraints.append(
+                        f"{self._bool_name(annotations.pack_specified)} in {{0, 1}}"
+                    )
                     if isinstance(pad, str):
-                        node.constraints.append(f"{pad} in {{0,1}}")
+                        node.constraints.append(f"{self._bool_name(pad)} in {{0, 1}}")
 
         if annotations.fuse_producer is not None:
             node.fuse_producer_at[loop_name] = annotations.fuse_producer
@@ -748,9 +788,35 @@ class Descript:
             spec = pre_parse(spec)
         constraints: Any = [v for k, v in spec if k == "constraints"]
         constraints = constraints[0] if constraints else None
-        spec = [(k, v) for k, v in spec if k != "constraints"]
+        enumerate_vars = self._parse_enumerate([v for k, v in spec if k == ENUMERATE])
+        meshes: dict[str, dict[str, literal]] = {}
+        for mesh in (MEMORY_MESH, PROCESSOR_MESH):
+            meshes[mesh] = {}
+            for k, v in spec:
+                if k == mesh:
+                    meshes[mesh] = self._parse_mesh(mesh, v)
+        tensor_pad_strategies: dict[literal, PadStrategiesArg] = {}
+        for key, value in spec:
+            match = TENSOR_PAD_STRATEGIES.fullmatch(key)
+            if match:
+                tensor = match.group(1)
+                if tensor not in self.abstract_matrix:
+                    raise ScheduleParseError(f"Unknown tensor in {key}.")
+                if tensor in tensor_pad_strategies:
+                    raise ScheduleParseError(f"Duplicate {key} declaration.")
+                strategies = parse_pad_strategies(value, key)
+                tensor_pad_strategies[tensor] = strategies
+                index = self.abstract_matrix.index(tensor)
+                if index < len(self.abstract_matrix) - 1:
+                    tensor_pad_strategies[index] = strategies
+        spec = [
+            (k, v)
+            for k, v in spec
+            if k not in ("constraints", ENUMERATE, MEMORY_MESH, PROCESSOR_MESH)
+            and not TENSOR_PAD_STRATEGIES.fullmatch(k)
+        ]
         # Parse the specification into an AST
-        parser = ScheduleParser()
+        parser = ScheduleParser(tensor_pad_strategies)
         ast = parser.parse(spec)
 
         # Interpret the AST into a LoopNest
@@ -767,7 +833,41 @@ class Descript:
         root = loop_nest.root_node
         if constraints and root:
             root.constraints += constraints
+        loop_nest.memory_mesh = meshes[MEMORY_MESH]
+        loop_nest.processor_mesh = meshes[PROCESSOR_MESH]
+        loop_nest.enumerate_vars = enumerate_vars
         return loop_nest
+
+    @staticmethod
+    def _parse_enumerate(values: list[Any]) -> list[str]:
+        """Parse the enumerate entries: names separated by spaces/commas, or lists."""
+        names: list[str] = []
+        for value in values:
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                if not isinstance(item, str):
+                    raise ScheduleParseError(
+                        f"Invalid enumerate entry {item!r}: expected a parameter name."
+                    )
+                for name in re.split(r"[\s,]+", item.strip()):
+                    if name and name not in names:
+                        names.append(name)
+        return names
+
+    @staticmethod
+    def _parse_mesh(name: str, value: Any) -> dict[str, literal]:
+        """Parse a mesh: axis -> size, a size being an int or a sample parameter."""
+        mesh = dict(value) if isinstance(value, (list, dict)) else None
+        if mesh is None or not all(
+            isinstance(v, str)
+            or (isinstance(v, int) and not isinstance(v, bool) and v > 0)
+            for v in mesh.values()
+        ):
+            raise ScheduleParseError(
+                f"`{name}` should map axis names to strictly positive integers "
+                "or parameter names."
+            )
+        return mesh
 
     def apply_sample(
         self,
@@ -810,8 +910,18 @@ class Descript:
         """Apply a LoopNest to the scheduler."""
         scheduler.set_dims(self.abstract_dims)
 
+        if loop_nest.memory_mesh:
+            scheduler.define_memory_mesh(loop_nest.memory_mesh)
+        if loop_nest.processor_mesh:
+            scheduler.define_processor_mesh(loop_nest.processor_mesh)
+
         if loop_nest.root_node is not None:
             self._apply_node(loop_nest.root_node, scheduler)
+
+    @staticmethod
+    def _pad_kwargs(strategies: Any) -> dict[str, Any]:
+        # Only pass the pad strategies when set, for backends ignoring them
+        return {} if strategies is None else {"pad_strategies": strategies}
 
     def _apply_node(self, node: LoopNestNode, scheduler: Scheduler) -> None:
         """Recursively apply a LoopNestNode and its children to the scheduler."""
@@ -829,10 +939,26 @@ class Descript:
         scheduler.unroll(node.unroll, root=root)
 
         for axis, mtype in node.buffer_at.items():
-            scheduler.buffer_at(axis, mtype=mtype, root=root)
+            scheduler.buffer_at(
+                axis,
+                mtype=mtype,
+                root=root,
+                pad=node.buffer_pad.get(axis, False),
+                **self._pad_kwargs(node.buffer_pad_strategies.get(axis)),
+            )
 
         for axis, (input_idx, mtype, pad) in node.pack_at.items():
-            scheduler.pack_at(axis, input_idx, mtype=mtype, pad=pad, root=root)
+            scheduler.pack_at(
+                axis,
+                input_idx,
+                mtype=mtype,
+                pad=pad,
+                root=root,
+                **self._pad_kwargs(node.pack_pad_strategies.get(axis)),
+            )
+
+        for axis, processor_axis in node.distribute.items():
+            scheduler.distribute(axis, processor_axis, root=root)
 
         for axis, input_idx in node.fuse_producer_at.items():
             scheduler.fuse_producer_at(axis, input_idx, root=root)
