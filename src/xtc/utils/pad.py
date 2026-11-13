@@ -77,6 +77,27 @@ def zero_multiple(constraints: list[PadConstraint]) -> int:
 # Compute the padding size
 
 
+def resolve_pad_strategies(
+    strategies: PadStrategiesArg, sample: dict[str, Any]
+) -> PadStrategiesArg:
+    """Replace the sample parameter names in the constraints args by their values."""
+    if strategies is None:
+        return None
+
+    def resolve(constraint: PadConstraint) -> PadConstraint:
+        if not any(isinstance(a, str) for a in constraint.get("args", [])):
+            return constraint
+        args = [sample[a] if isinstance(a, str) else a for a in constraint["args"]]
+        if constraint["type"] == "modulo_constraint" and not 0 <= args[1] < args[0]:
+            raise ValueError(f"Invalid pad constraint mod({args[0]}, {args[1]}).")
+        return {**constraint, "args": args}
+
+    return [
+        resolve(s) if isinstance(s, dict) else [resolve(c) for c in s]
+        for s in strategies
+    ]
+
+
 def normalize_pad_strategies(
     strategies: PadStrategiesArg,
 ) -> PadStrategies | None:
