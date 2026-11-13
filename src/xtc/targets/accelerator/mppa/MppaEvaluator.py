@@ -50,6 +50,7 @@ class MppaEvaluator(itf.exec.Evaluator):
             "reference_impl", self._module._reference_impl
         )
         self._pmu_counters = kwargs.get("pmu_counters", [])
+        self._timeout = kwargs.get("timeout")
 
         assert self._module.file_type == "shlib", "only support shlib for evaluation"
 
@@ -113,7 +114,10 @@ class MppaEvaluator(itf.exec.Evaluator):
             return self._evaluate_native(worker_parameters, isolated=True)
 
         result, outputs = run_isolated(
-            operation, error_type=XtcRuntimeError, stage="MPPA device initialization"
+            operation,
+            error_type=XtcRuntimeError,
+            stage="MPPA device initialization",
+            timeout=self._timeout,
         )
         if outputs is not None and self._parameters is not None:
             for target, output in zip(self._parameters[1], outputs):

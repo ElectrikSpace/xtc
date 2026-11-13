@@ -91,3 +91,9 @@ class XtcRuntimeError(XtcError):
     """Native execution failed."""
 
     title = "XTC execution failed"
+
+
+class XtcTimeoutError(XtcRuntimeError):
+    """Native execution exceeded its time limit."""
+
+    title = "XTC execution timed out"
