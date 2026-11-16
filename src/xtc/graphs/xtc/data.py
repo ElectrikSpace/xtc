@@ -36,12 +36,19 @@ class XTCTensorType(TensorType):
         device: AcceleratorDevice | None = None,
         const: bool = False,
         layout: list[int] | None = None,
+        memory: str | None = None,
     ):
         self._shape = shape
         self._dtype = dtype
         self._device = device
         self._const = const
         self._layout = layout
+        self._memory = memory
+
+    @property
+    def memory(self) -> str | None:
+        """Device memory where the tensor lives (None means device default)."""
+        return self._memory
 
     @property
     @override
@@ -121,6 +128,7 @@ class XTCTensorType(TensorType):
             device=self.device,
             const=self.const,
             layout=self.layout,
+            memory=self.memory,
         )
 
     @override
@@ -177,12 +185,14 @@ class XTCConstantTensorType(XTCTensorType, ConstantTensorType):
         device: AcceleratorDevice | None = None,
         const: bool = False,
         layout: list[int] | None = None,
+        memory: str | None = None,
     ):
         self._shape: ConstantShapeType = shape
         self._dtype: ConstantDataType = dtype
         self._device = device
         self._const = const
         self._layout = layout
+        self._memory = memory
 
     @property
     @override

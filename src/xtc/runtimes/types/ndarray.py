@@ -45,6 +45,7 @@ class NDArray:
         array: Any,
         runtime: CommonRuntimeInterface | None = None,
         layout: list[int] | None = None,
+        memory: str | None = None,
     ) -> None:
         if not self.rev_np_dtype_map:
             self.rev_np_dtype_map.update(
@@ -58,6 +59,11 @@ class NDArray:
             self.runtime = HostRuntime()
         self.location = NDArrayLocation.HOST
         self.layout = layout
+        self.memory = memory
+        if isinstance(self.runtime, AcceleratorDevice):
+            self.runtime.resolve_memory(memory)
+        elif memory not in (None, "global", "ddr"):
+            raise ValueError(f"unsupported memory {memory!r} for host runtime")
         if isinstance(array, NDArray):
             raise RuntimeError("TODO: copy from CNDArray not supported yet")
         elif isinstance(array, np.ndarray):
@@ -123,7 +129,7 @@ class NDArray:
         )
         assert self.handle is not None
         bytes_size = self.size * self.dtype.itemsize
-        self.device_handle = self.runtime.memory_allocate(bytes_size)
+        self.device_handle = self.runtime.memory_allocate(bytes_size, self.memory)
         self.runtime.memory_copy_to(
             self.device_handle, self.handle.contents.dl_tensor.data, bytes_size
         )

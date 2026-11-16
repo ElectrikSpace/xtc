@@ -128,23 +128,35 @@ class XTCTensorExpr(XTCValueExpr):
         device: AcceleratorDevice | None = None,
         const: bool = False,
         layout: list[int] | None = None,
+        memory: str | None = None,
     ) -> None:
         super().__init__()
         if tensor is None:
             assert shape is None or isinstance(shape, tuple)
             assert dtype is None or isinstance(dtype, str)
             type = XTCTensorType(
-                shape=shape, dtype=dtype, device=device, const=const, layout=layout
+                shape=shape,
+                dtype=dtype,
+                device=device,
+                const=const,
+                layout=layout,
+                memory=memory,
             )
             value = XTCTensor(type=type)
         elif isinstance(tensor, XTCTensorType):
             assert shape is None and dtype is None and layout is None
+            assert memory is None, (
+                "memory cannot be set when tensor type is provided directly"
+            )
             assert not const, (
                 "const cannot be set when tensor type is provided directly"
             )
             value = XTCTensor(type=tensor)
         elif isinstance(tensor, XTCTensor):
             assert shape is None and dtype is None and layout is None
+            assert memory is None, (
+                "memory cannot be set when tensor value is provided directly"
+            )
             assert not const, (
                 "const cannot be set when tensor value is provided directly"
             )
@@ -154,11 +166,21 @@ class XTCTensorExpr(XTCValueExpr):
                 assert isinstance(shape, str)
                 assert dtype is None
                 type = XTCTensorType(
-                    shape=tensor, dtype=shape, device=device, const=const, layout=layout
+                    shape=tensor,
+                    dtype=shape,
+                    device=device,
+                    const=const,
+                    layout=layout,
+                    memory=memory,
                 )
             else:
                 type = XTCTensorType(
-                    shape=tensor, dtype=dtype, device=device, const=const, layout=layout
+                    shape=tensor,
+                    dtype=dtype,
+                    device=device,
+                    const=const,
+                    layout=layout,
+                    memory=memory,
                 )
             value = XTCTensor(type=type)
         self._value = value

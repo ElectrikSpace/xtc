@@ -590,8 +590,17 @@ class MppaDevice(AcceleratorDevice):
         self.loaded_kernels[module].close()
         self.loaded_kernels.pop(module)
 
+    # Memory kinds understood by mppa_memory_allocate/free in host.c
+    _MEMORY_KINDS: dict[str, int] = {"global": 0}
+    _handle_kinds: dict[int, int] = {}
+
     @override
-    def memory_allocate(self, size_bytes: int) -> Any:
+    def supported_memories(self) -> tuple[str, ...]:
+        return tuple(self._MEMORY_KINDS)
+
+    @override
+    def memory_allocate(self, size_bytes: int, memory: str | None = None) -> Any:
+        kind = self._MEMORY_KINDS[self.resolve_memory(memory)]
         assert self.lib_loader is not None
         # Create a memory handle
         create_memory_handle_fn = getattr(
@@ -601,10 +610,11 @@ class MppaDevice(AcceleratorDevice):
         memory_handle = create_memory_handle_fn()
         # Allocate memory
         allocate_memory_fn = getattr(self.lib_loader.lib, "mppa_memory_allocate")
-        allocate_memory_fn.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        allocate_memory_fn.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
         allocate_memory_fn.restype = ctypes.c_bool
-        if not allocate_memory_fn(memory_handle, size_bytes):
+        if not allocate_memory_fn(memory_handle, size_bytes, kind):
             raise Exception("Failed to allocate memory")
+        self._handle_kinds[memory_handle] = kind
         return memory_handle
 
     @override
@@ -614,9 +624,9 @@ class MppaDevice(AcceleratorDevice):
         assert self.lib_loader is not None
         # Free memory
         free_memory_fn = getattr(self.lib_loader.lib, "mppa_memory_free")
-        free_memory_fn.argtypes = [ctypes.c_void_p]
+        free_memory_fn.argtypes = [ctypes.c_void_p, ctypes.c_int]
         free_memory_fn.restype = ctypes.c_bool
-        if not free_memory_fn(handle):
+        if not free_memory_fn(handle, self._handle_kinds.pop(handle)):
             raise Exception("Failed to free memory")
         # Destroy memory handle
         destroy_memory_handle_fn = getattr(

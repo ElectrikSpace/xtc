@@ -129,7 +129,8 @@ class GPUDevice(AcceleratorDevice):
         self.loaded_kernels.pop(module)
 
     @override
-    def memory_allocate(self, size_bytes: int) -> Any:
+    def memory_allocate(self, size_bytes: int, memory: str | None = None) -> Any:
+        self.resolve_memory(memory)
         func_name = "mgpuMemAlloc"
         func = getattr(self._mlir_runtime_lib.lib, func_name)
         assert func is not None, (

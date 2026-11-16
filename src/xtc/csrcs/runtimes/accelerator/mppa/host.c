@@ -65,24 +65,38 @@ void mppa_set_alloc_alignment(size_t alignment)
     mppa_alloc_alignment = alignment;
 }
 
-bool mppa_memory_allocate(void *handle, size_t size)
+// Memory kinds, must be kept in sync with MppaDevice._MEMORY_KINDS
+enum { MPPA_MEMORY_KIND_GLOBAL = 0 };
+
+static int mppa_memory_kind(int kind)
+{
+    switch (kind) {
+    case MPPA_MEMORY_KIND_GLOBAL:
+        return MPPA_OFFLOAD_ALLOC_DDR;
+    default:
+        assert(0 && "Unknown memory kind\n");
+        return MPPA_OFFLOAD_ALLOC_DDR;
+    }
+}
+
+bool mppa_memory_allocate(void *handle, size_t size, int kind)
 {
     assert(handle != NULL);
     assert(master_sysqueue != NULL);
     mppa_buffer_t *buffer = (mppa_buffer_t *)handle;
-    if (mppa_offload_alloc(master_sysqueue, size, mppa_alloc_alignment, MPPA_OFFLOAD_ALLOC_DDR, &(buffer->voffset), &(buffer->offset)) != 0) {
+    if (mppa_offload_alloc(master_sysqueue, size, mppa_alloc_alignment, mppa_memory_kind(kind), &(buffer->voffset), &(buffer->offset)) != 0) {
         assert(0 && "Fail to alloc buffer\n");
         return false;
     }
     return true;
 }
 
-bool mppa_memory_free(void *handle)
+bool mppa_memory_free(void *handle, int kind)
 {
     assert(handle != NULL);
     assert(master_sysqueue != NULL);
     mppa_buffer_t *buffer = (mppa_buffer_t *)handle;
-    if (mppa_offload_free(master_sysqueue, MPPA_OFFLOAD_ALLOC_DDR, buffer->voffset) != 0) {
+    if (mppa_offload_free(master_sysqueue, mppa_memory_kind(kind), buffer->voffset) != 0) {
         assert(0 && "Fail to dealloc buffer\n");
         return false;
     }

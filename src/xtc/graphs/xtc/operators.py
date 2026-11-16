@@ -37,10 +37,12 @@ class XTCOperator(Operator):
         self,
         name: str,
         device: AcceleratorDevice | None = None,
+        memory: str | None = None,
         **attrs: XTCOperatorAttr,
     ) -> None:
         self._name = name
         self._device = device
+        self._memory = memory
         self._attrs = NS(**attrs)
 
     @property
@@ -56,6 +58,10 @@ class XTCOperator(Operator):
     def device(self) -> AcceleratorDevice | None:
         return self._device
 
+    @property
+    def memory(self) -> str | None:
+        return self._memory
+
     @override
     def forward_types(
         self, inputs_types: Sequence[TensorType]
@@ -70,6 +76,7 @@ class XTCOperator(Operator):
                     shape=inp_tensor_type.shape,
                     dtype=inp_tensor_type.dtype,
                     device=inp_tensor_type.device,
+                    memory=inp_tensor_type.memory,
                 )
             )
         return res_types
@@ -204,7 +211,12 @@ class XTCOperMatmul(XTCOperator):
         if out_dtype is None:
             out_dtype = inputs_types[0].dtype
         return [
-            XTCTensorType(shape=(i, j), dtype=out_dtype, device=self.device),
+            XTCTensorType(
+                shape=(i, j),
+                dtype=out_dtype,
+                device=self.device,
+                memory=self.memory,
+            ),
         ]
 
     @override
@@ -226,6 +238,7 @@ class XTCOperMatmul(XTCOperator):
             shape=out.shape,
             dtype=expected_type.constant_dtype,
             device=expected_type.device,
+            memory=expected_type.memory,
         )
         assert matmul.type == expected_type, (
             f"output type mismatch expect: {matmul.type} != {expected_type}"
@@ -296,7 +309,11 @@ class XTCOperEltwiseBinary(XTCOperator):
         assert t0.dtype == t1.dtype, (
             f"incompatible dtypes for {self.name}: {t0.dtype} {t1.dtype}"
         )
-        return [XTCTensorType(shape=t0.shape, dtype=t0.dtype, device=self.device)]
+        return [
+            XTCTensorType(
+                shape=t0.shape, dtype=t0.dtype, device=self.device, memory=self.memory
+            )
+        ]
 
     @override
     def forward(self, inputs: Sequence[Tensor]) -> Sequence[XTCTensor]:
@@ -307,6 +324,7 @@ class XTCOperEltwiseBinary(XTCOperator):
             shape=out.shape,
             dtype=expected_type.constant_dtype,
             device=expected_type.device,
+            memory=expected_type.memory,
         )
         return [res]
 
@@ -361,7 +379,10 @@ class XTCOperFma(XTCOperator):
         )
         return [
             XTCTensorType(
-                shape=types[0].shape, dtype=types[0].dtype, device=self.device
+                shape=types[0].shape,
+                dtype=types[0].dtype,
+                device=self.device,
+                memory=self.memory,
             )
         ]
 
@@ -375,6 +396,7 @@ class XTCOperFma(XTCOperator):
             shape=out.shape,
             dtype=expected_type.constant_dtype,
             device=expected_type.device,
+            memory=expected_type.memory,
         )
         return [res]
 
@@ -450,6 +472,7 @@ class XTCOperConv2D(XTCOperator):
                 shape=tuple([*inputs_types[0].shape[:-3], oh, ow, f]),
                 dtype=inputs_types[0].dtype,
                 device=self.device,
+                memory=self.memory,
             ),
         ]
 

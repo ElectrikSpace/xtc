@@ -66,16 +66,43 @@ class AcceleratorDevice(CommonRuntimeInterface, ABC):
         ...
 
     @abstractmethod
-    def memory_allocate(self, size_bytes: int) -> Any:
+    def memory_allocate(self, size_bytes: int, memory: str | None = None) -> Any:
         """Allocate memory on the accelerator device.
 
         Args:
             size_bytes (int): The size in bytes to allocate.
+            memory (str | None): The device memory to allocate in. None or
+                "global" (alias "ddr") is the device default memory.
 
         Returns:
             A handle or reference to the allocated memory.
+
+        Raises:
+            ValueError: if the memory is not supported by the device.
         """
         ...
+
+    def supported_memories(self) -> tuple[str, ...]:
+        """Canonical names of the memories supported by the device.
+
+        Devices extend this with their specific memories.
+        """
+        return ("global",)
+
+    def resolve_memory(self, memory: str | None) -> str:
+        """Return the canonical memory name, "ddr" being an alias of "global".
+
+        Raises:
+            ValueError: if the memory is not supported by the device.
+        """
+        if memory is None or memory == "ddr":
+            return "global"
+        if memory not in self.supported_memories():
+            raise ValueError(
+                f"unsupported memory {memory!r} for {type(self).__name__}, "
+                f"supported: {(*self.supported_memories(), 'ddr')}"
+            )
+        return memory
 
     @abstractmethod
     def memory_free(self, handle: Any) -> None:
