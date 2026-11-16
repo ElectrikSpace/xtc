@@ -806,6 +806,89 @@ class MlirOperatorPad(MlirOperator):
         return (dtype,)
 
 
+class MlirOperatorEltwiseBinary(MlirOperator):
+    AXES = "ijklmnopqrstuvwxyz"
+    KINDS = "PPPPPPPPPPPPPPPPPP"
+    ARITH_OP: Any = None
+
+    @override
+    def dims(self, kind: str = "") -> tuple[str, ...]:
+        rank = len(self.args) - 1
+        return self._dims(kind)[:rank]
+
+    @override
+    def dims_sizes(self) -> dict[str, int]:
+        return {name: size for name, size in zip(self.AXES, self.args[:-1])}
+
+    @override
+    def generate_op(
+        self, block: Block | None = None, args: Sequence[BlockArgument] = []
+    ) -> tuple[Block, OpAttrs]:
+        shape = list(self.args[:-1])
+        dtype = self.args[-1]
+        rank = len(shape)
+        elt_type = {"float16": f16, "float32": f32, "float64": f64}[dtype]
+        if block is None:
+            ops_types = [self.op_type(elt_type, shape) for _ in range(3)]
+            block = Block(arg_types=ops_types)
+            args = block.args
+        assert len(args) == 3
+        assert all(isinstance(arg.type, self.op_type) for arg in args)
+        with ImplicitBuilder(block):
+            ident = AffineMapAttr(AffineMap.identity(rank))
+            indexing_maps = [ident, ident, ident]
+            iterator_types = [StringAttr("parallel")] * rank
+            result = (args[2].type,) if self.op_type == TensorType else ()
+            block_in = Block(arg_types=[elt_type, elt_type, elt_type])
+            with ImplicitBuilder(block_in):
+                res = self.ARITH_OP(block_in.args[0], block_in.args[1])
+                linalg.YieldOp(res)
+            node = linalg.GenericOp(
+                inputs=(args[0], args[1]),
+                outputs=(args[2],),
+                body=Region([block_in]),  # type: ignore # mypy issue with dataclass
+                indexing_maps=indexing_maps,
+                iterator_types=iterator_types,
+                result_types=result,
+            )
+        node_id = f"{self.name}"
+        node.attributes[f"__xtc_id_{node_id}_"] = UnitAttr()
+        attrs = {
+            "nodes_map": {node_id: node},
+            "dims_sizes": [self.dims_sizes()],
+            "output_nodes": [node],
+        }
+        return block, attrs
+
+    @override
+    def inputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        return (tuple(self.args[:-1]), tuple(self.args[:-1]))
+
+    @override
+    def inputs_types(self) -> tuple[str, ...]:
+        dtype = self.args[-1]
+        return (dtype, dtype)
+
+    @override
+    def outputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        return (tuple(self.args[:-1]),)
+
+    @override
+    def outputs_types(self) -> tuple[str, ...]:
+        dtype = self.args[-1]
+        return (dtype,)
+
+
+class MlirOperatorAdd(MlirOperatorEltwiseBinary):
+    DEFAULT_NAME = "add"
+    ARITH_OP = arith.AddfOp
+
+
+class MlirOperatorMul(MlirOperatorEltwiseBinary):
+    DEFAULT_NAME = "mul"
+    ARITH_OP = arith.MulfOp
+
+
 class MlirOperatorPad2D(MlirOperatorPad):
     DEFAULT_NAME = "pad2d"
     AXES = "bhwc"
@@ -927,6 +1010,8 @@ class MlirOperators:
     matmul = MlirOperatorMatmul
     conv2d = MlirOperatorConv2D
     relu = MlirOperatorRelu
+    add = MlirOperatorAdd
+    mul = MlirOperatorMul
     pad2d = MlirOperatorPad2D
     unpad = MlirOperatorUnpad
     pad = MlirOperatorPad

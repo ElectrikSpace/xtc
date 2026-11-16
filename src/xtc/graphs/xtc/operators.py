@@ -261,6 +261,70 @@ class XTCOperRelu(XTCOperator):
         return [relu]
 
 
+class XTCOperEltwiseBinary(XTCOperator):
+    NP_FUNC: Any = None
+
+    @override
+    def get_operation(
+        self,
+        inps_types: Sequence[XTCTensorType],
+        outs_types: Sequence[XTCTensorType],
+    ) -> XTCOperation:
+        shape = inps_types[0].constant_shape
+        axes = [chr(ord("i") + n) for n in range(len(shape))]
+        return self._get_operation(
+            inps_types,
+            outs_types,
+            dims=dict(zip(axes, shape)),
+            kinds=("P",) * len(shape),
+            inps_maps=(tuple(axes), tuple(axes)),
+            outs_maps=(tuple(axes),),
+        )
+
+    @override
+    def forward_types(
+        self, inputs_types: Sequence[TensorType]
+    ) -> Sequence[XTCTensorType]:
+        assert len(inputs_types) == 2
+        t0 = cast(XTCTensorType, inputs_types[0])
+        t1 = cast(XTCTensorType, inputs_types[1])
+        assert t0.shape is not None and t1.shape is not None
+        assert t0.constant_shape == t1.constant_shape, (
+            f"incompatible shapes for {self.name}: "
+            f"{t0.constant_shape} {t1.constant_shape}"
+        )
+        assert t0.dtype == t1.dtype, (
+            f"incompatible dtypes for {self.name}: {t0.dtype} {t1.dtype}"
+        )
+        return [XTCTensorType(shape=t0.shape, dtype=t0.dtype, device=self.device)]
+
+    @override
+    def forward(self, inputs: Sequence[Tensor]) -> Sequence[XTCTensor]:
+        expected_type = self.forward_types([inp.type for inp in inputs])[0]
+        out = type(self).NP_FUNC(inputs[0].numpy(), inputs[1].numpy())
+        res = XTCTensor(out.astype(expected_type.constant_dtype))
+        res._type = XTCTensorType(
+            shape=out.shape,
+            dtype=expected_type.constant_dtype,
+            device=expected_type.device,
+        )
+        return [res]
+
+
+class XTCOperAdd(XTCOperEltwiseBinary):
+    NP_FUNC = staticmethod(np.add)
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("add", **attrs)
+
+
+class XTCOperMul(XTCOperEltwiseBinary):
+    NP_FUNC = staticmethod(np.multiply)
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("mul", **attrs)
+
+
 class XTCOperConv2D(XTCOperator):
     def __init__(self, **attrs: XTCOperatorAttr) -> None:
         super().__init__("conv2d", **attrs)

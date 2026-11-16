@@ -5,12 +5,13 @@ from pathlib import Path
 
 GRAPHS_DIR = Path(__file__).parents[2] / "graphs"
 
+
 @pytest.mark.parametrize(
     "opname",
     [
         "matmul",
         "conv2d",
-    ]
+    ],
 )
 def test_matmul_graph_load(opname: str):
     with O.graph() as gb:
@@ -56,13 +57,16 @@ def test_conv2d_pad_sdump_sload():
             gb3.load(f.name)
         assert gb.graph.to_dict() == gb3.graph.to_dict()
 
+
 def test_mlp_fc_custom_output():
     img = O.tensor()
     w1 = O.tensor()
     w2 = O.tensor()
     w3 = O.tensor()
     w4 = O.tensor()
-    fc = lambda i, w, nout: O.matmul(O.reshape(i, shape=(1, -1)), O.reshape(w, shape=(-1, nout)))
+    fc = lambda i, w, nout: O.matmul(
+        O.reshape(i, shape=(1, -1)), O.reshape(w, shape=(-1, nout))
+    )
     # Multi Layer Perceptron with 3 relu(fc) + 1 fc
     with O.graph(name="mlp4") as gb:
         with O.graph(name="l1"):
@@ -82,3 +86,17 @@ def test_mlp_fc_custom_output():
     assert graph_dict != {}
     assert graph_dict == gb2.graph.to_dict()
 
+
+def test_add_mul_forward():
+    import numpy as np
+    from xtc.graphs.xtc.data import XTCTensor
+
+    a = O.tensor((4, 8), "float32", name="A")
+    b = O.tensor((4, 8), "float32", name="B")
+    with O.graph(name="add_mul") as gb:
+        s = O.add(a, b, name="add")
+        O.mul(s, b, name="mul")
+    x = np.random.rand(4, 8).astype("float32")
+    y = np.random.rand(4, 8).astype("float32")
+    res = gb.graph.forward([XTCTensor(x), XTCTensor(y)])
+    assert np.allclose(res[0].numpy(), (x + y) * y)
