@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 from typing_extensions import override
 
-from xtc.itf.runtime.accelerator import AcceleratorDevice
+from xtc.itf.runtime.accelerator import AcceleratorDevice, check_memory_distribution
 from xtc.itf.comp.module import Module
 from xtc.utils.cfunc import CFunc, _str_list_to_c, _c_ascii_str
 
@@ -129,8 +129,14 @@ class GPUDevice(AcceleratorDevice):
         self.loaded_kernels.pop(module)
 
     @override
-    def memory_allocate(self, size_bytes: int, memory: str | None = None) -> Any:
+    def memory_allocate(
+        self,
+        size_bytes: int,
+        memory: str | None = None,
+        distribution: list[str] | None = None,
+    ) -> Any:
         self.resolve_memory(memory)
+        check_memory_distribution(memory, distribution, None)
         func_name = "mgpuMemAlloc"
         func = getattr(self._mlir_runtime_lib.lib, func_name)
         assert func is not None, (

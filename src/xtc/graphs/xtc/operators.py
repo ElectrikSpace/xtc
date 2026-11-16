@@ -38,11 +38,13 @@ class XTCOperator(Operator):
         name: str,
         device: AcceleratorDevice | None = None,
         memory: str | None = None,
+        distribution: list[str] | None = None,
         **attrs: XTCOperatorAttr,
     ) -> None:
         self._name = name
         self._device = device
         self._memory = memory
+        self._distribution = distribution
         self._attrs = NS(**attrs)
 
     @property
@@ -62,6 +64,10 @@ class XTCOperator(Operator):
     def memory(self) -> str | None:
         return self._memory
 
+    @property
+    def distribution(self) -> list[str] | None:
+        return self._distribution
+
     @override
     def forward_types(
         self, inputs_types: Sequence[TensorType]
@@ -77,6 +83,7 @@ class XTCOperator(Operator):
                     dtype=inp_tensor_type.dtype,
                     device=inp_tensor_type.device,
                     memory=inp_tensor_type.memory,
+                    distribution=inp_tensor_type.distribution,
                 )
             )
         return res_types
@@ -216,6 +223,7 @@ class XTCOperMatmul(XTCOperator):
                 dtype=out_dtype,
                 device=self.device,
                 memory=self.memory,
+                distribution=self.distribution,
             ),
         ]
 
@@ -239,6 +247,7 @@ class XTCOperMatmul(XTCOperator):
             dtype=expected_type.constant_dtype,
             device=expected_type.device,
             memory=expected_type.memory,
+            distribution=expected_type.distribution,
         )
         assert matmul.type == expected_type, (
             f"output type mismatch expect: {matmul.type} != {expected_type}"
@@ -325,6 +334,7 @@ class XTCOperEltwiseBinary(XTCOperator):
             dtype=expected_type.constant_dtype,
             device=expected_type.device,
             memory=expected_type.memory,
+            distribution=expected_type.distribution,
         )
         return [res]
 
@@ -383,6 +393,7 @@ class XTCOperFma(XTCOperator):
                 dtype=types[0].dtype,
                 device=self.device,
                 memory=self.memory,
+                distribution=self.distribution,
             )
         ]
 
@@ -397,6 +408,7 @@ class XTCOperFma(XTCOperator):
             dtype=expected_type.constant_dtype,
             device=expected_type.device,
             memory=expected_type.memory,
+            distribution=expected_type.distribution,
         )
         return [res]
 
@@ -473,6 +485,7 @@ class XTCOperConv2D(XTCOperator):
                 dtype=inputs_types[0].dtype,
                 device=self.device,
                 memory=self.memory,
+                distribution=self.distribution,
             ),
         ]
 

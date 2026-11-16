@@ -129,6 +129,7 @@ class XTCTensorExpr(XTCValueExpr):
         const: bool = False,
         layout: list[int] | None = None,
         memory: str | None = None,
+        distribution: list[str] | None = None,
     ) -> None:
         super().__init__()
         if tensor is None:
@@ -141,11 +142,12 @@ class XTCTensorExpr(XTCValueExpr):
                 const=const,
                 layout=layout,
                 memory=memory,
+                distribution=distribution,
             )
             value = XTCTensor(type=type)
         elif isinstance(tensor, XTCTensorType):
             assert shape is None and dtype is None and layout is None
-            assert memory is None, (
+            assert memory is None and distribution is None, (
                 "memory cannot be set when tensor type is provided directly"
             )
             assert not const, (
@@ -154,7 +156,7 @@ class XTCTensorExpr(XTCValueExpr):
             value = XTCTensor(type=tensor)
         elif isinstance(tensor, XTCTensor):
             assert shape is None and dtype is None and layout is None
-            assert memory is None, (
+            assert memory is None and distribution is None, (
                 "memory cannot be set when tensor value is provided directly"
             )
             assert not const, (
@@ -172,6 +174,7 @@ class XTCTensorExpr(XTCValueExpr):
                     const=const,
                     layout=layout,
                     memory=memory,
+                    distribution=distribution,
                 )
             else:
                 type = XTCTensorType(
@@ -181,6 +184,7 @@ class XTCTensorExpr(XTCValueExpr):
                     const=const,
                     layout=layout,
                     memory=memory,
+                    distribution=distribution,
                 )
             value = XTCTensor(type=type)
         self._value = value

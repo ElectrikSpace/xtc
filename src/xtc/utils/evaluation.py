@@ -38,6 +38,7 @@ def graph_np_inputs_spec(graph: Graph) -> Callable[[], list[dict[str, Any]]]:
                 "device": type.device,
                 "layout": type.layout,
                 "memory": type.memory,
+                "distribution": type.distribution,
             }
             for type in inputs_types
         ]
@@ -58,6 +59,7 @@ def graph_np_outputs_spec(graph: Graph) -> Callable[[], list[dict[str, Any]]]:
                 "dtype": type.constant_dtype,
                 "device": type.device,
                 "memory": type.memory,
+                "distribution": type.distribution,
             }
             for type in [
                 cast(list, node._outputs_types)[0] for node in graph.outputs_nodes
@@ -95,12 +97,13 @@ def ensure_ndarray_parameters(
                     **{
                         k: v
                         for k, v in spec.items()
-                        if k not in ("device", "layout", "memory")
+                        if k not in ("device", "layout", "memory", "distribution")
                     }
                 ),
                 spec["device"] if "device" in spec else HostRuntime.get(),
                 spec["layout"] if "layout" in spec else None,
                 spec["memory"] if "memory" in spec else None,
+                spec["distribution"] if "distribution" in spec else None,
             )
             for spec in inputs_spec
         ]
@@ -109,7 +112,7 @@ def ensure_ndarray_parameters(
                 **{
                     k: v
                     for k, v in spec.items()
-                    if k not in ("device", "layout", "memory")
+                    if k not in ("device", "layout", "memory", "distribution")
                 }
             )
             for spec in outputs_spec
@@ -121,6 +124,9 @@ def ensure_ndarray_parameters(
                     out,
                     runtime=spec["device"] if "device" in spec else HostRuntime.get(),
                     memory=spec["memory"] if "memory" in spec else None,
+                    distribution=spec["distribution"]
+                    if "distribution" in spec
+                    else None,
                 )
                 for out, spec in zip(outputs, outputs_spec)
             ],

@@ -9,6 +9,34 @@ from xtc.itf.comp.module import Module
 from xtc.itf.runtime.common import CommonRuntimeInterface
 
 
+def check_memory_distribution(
+    memory: str | None, distribution: list[str] | None, ndim: int | None
+) -> None:
+    """Check the consistency of a tensor memory and its distribution.
+
+    The distribution is mandatory for the "smem" memory and only allowed for it.
+    It must be a list with one element per tensor dimension (when known).
+
+    Raises:
+        ValueError: if the memory and distribution are inconsistent.
+    """
+    if distribution is None:
+        if memory == "smem":
+            raise ValueError("distribution is mandatory when memory is 'smem'")
+        return
+    if memory != "smem":
+        raise ValueError(
+            f"distribution can only be set when memory is 'smem': {memory!r}"
+        )
+    if not isinstance(distribution, list):
+        raise ValueError(f"distribution must be a list: {distribution!r}")
+    if ndim is not None and len(distribution) != ndim:
+        raise ValueError(
+            f"distribution must have one element per tensor dimension: "
+            f"{len(distribution)} != {ndim}"
+        )
+
+
 class AcceleratorDevice(CommonRuntimeInterface, ABC):
     """Abstract interface for an accelerator device (such as GPU, MPPA, etc)."""
 
@@ -66,13 +94,20 @@ class AcceleratorDevice(CommonRuntimeInterface, ABC):
         ...
 
     @abstractmethod
-    def memory_allocate(self, size_bytes: int, memory: str | None = None) -> Any:
+    def memory_allocate(
+        self,
+        size_bytes: int,
+        memory: str | None = None,
+        distribution: list[str] | None = None,
+    ) -> Any:
         """Allocate memory on the accelerator device.
 
         Args:
             size_bytes (int): The size in bytes to allocate.
             memory (str | None): The device memory to allocate in. None or
                 "global" (alias "ddr") is the device default memory.
+            distribution (list[str] | None): The distribution of the tensor dimensions,
+                mandatory for (and only valid with) the "smem" memory.
 
         Returns:
             A handle or reference to the allocated memory.

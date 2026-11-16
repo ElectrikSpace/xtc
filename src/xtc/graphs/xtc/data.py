@@ -19,7 +19,7 @@ from xtc.itf.data import (
     ConstantDataType,
 )
 
-from xtc.itf.runtime.accelerator import AcceleratorDevice
+from xtc.itf.runtime.accelerator import AcceleratorDevice, check_memory_distribution
 
 
 __all__ = [
@@ -37,6 +37,7 @@ class XTCTensorType(TensorType):
         const: bool = False,
         layout: list[int] | None = None,
         memory: str | None = None,
+        distribution: list[str] | None = None,
     ):
         self._shape = shape
         self._dtype = dtype
@@ -44,6 +45,15 @@ class XTCTensorType(TensorType):
         self._const = const
         self._layout = layout
         self._memory = memory
+        self._distribution = distribution
+        check_memory_distribution(
+            memory, distribution, None if shape is None else len(shape)
+        )
+
+    @property
+    def distribution(self) -> list[str] | None:
+        """Mapping of the tensor dimensions, mandatory for the "smem" memory."""
+        return self._distribution
 
     @property
     def memory(self) -> str | None:
@@ -129,6 +139,7 @@ class XTCTensorType(TensorType):
             const=self.const,
             layout=self.layout,
             memory=self.memory,
+            distribution=self.distribution,
         )
 
     @override
@@ -186,6 +197,7 @@ class XTCConstantTensorType(XTCTensorType, ConstantTensorType):
         const: bool = False,
         layout: list[int] | None = None,
         memory: str | None = None,
+        distribution: list[str] | None = None,
     ):
         self._shape: ConstantShapeType = shape
         self._dtype: ConstantDataType = dtype
@@ -193,6 +205,8 @@ class XTCConstantTensorType(XTCTensorType, ConstantTensorType):
         self._const = const
         self._layout = layout
         self._memory = memory
+        self._distribution = distribution
+        check_memory_distribution(memory, distribution, len(shape))
 
     @property
     @override

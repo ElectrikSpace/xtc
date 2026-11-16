@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 from typing_extensions import override
 
-from xtc.itf.runtime.accelerator import AcceleratorDevice
+from xtc.itf.runtime.accelerator import AcceleratorDevice, check_memory_distribution
 from xtc.itf.comp.module import Module
 from xtc.utils.cfunc import CFunc, _str_list_to_c
 from xtc.errors import XtcCompileError
@@ -596,11 +596,20 @@ class MppaDevice(AcceleratorDevice):
 
     @override
     def supported_memories(self) -> tuple[str, ...]:
-        return tuple(self._MEMORY_KINDS)
+        return (*self._MEMORY_KINDS, "smem")
 
     @override
-    def memory_allocate(self, size_bytes: int, memory: str | None = None) -> Any:
-        kind = self._MEMORY_KINDS[self.resolve_memory(memory)]
+    def memory_allocate(
+        self,
+        size_bytes: int,
+        memory: str | None = None,
+        distribution: list[str] | None = None,
+    ) -> Any:
+        memory = self.resolve_memory(memory)
+        check_memory_distribution(memory, distribution, None)
+        if memory == "smem":
+            raise NotImplementedError("smem memory is not implemented in the runtime")
+        kind = self._MEMORY_KINDS[memory]
         assert self.lib_loader is not None
         # Create a memory handle
         create_memory_handle_fn = getattr(

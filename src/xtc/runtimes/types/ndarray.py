@@ -16,7 +16,7 @@ from .dlpack import DLDevice, DLDeviceTypeCode, DLDataType, DLDataTypeCode, CNDA
 from xtc.runtimes.host.HostRuntime import HostRuntime
 
 from xtc.itf.runtime.common import CommonRuntimeInterface
-from xtc.itf.runtime.accelerator import AcceleratorDevice
+from xtc.itf.runtime.accelerator import AcceleratorDevice, check_memory_distribution
 
 
 class NDArrayLocation(Enum):
@@ -46,6 +46,7 @@ class NDArray:
         runtime: CommonRuntimeInterface | None = None,
         layout: list[int] | None = None,
         memory: str | None = None,
+        distribution: list[str] | None = None,
     ) -> None:
         if not self.rev_np_dtype_map:
             self.rev_np_dtype_map.update(
@@ -60,6 +61,9 @@ class NDArray:
         self.location = NDArrayLocation.HOST
         self.layout = layout
         self.memory = memory
+        self.distribution = distribution
+        if isinstance(array, np.ndarray):
+            check_memory_distribution(memory, distribution, array.ndim)
         if isinstance(self.runtime, AcceleratorDevice):
             self.runtime.resolve_memory(memory)
         elif memory not in (None, "global", "ddr"):
@@ -129,7 +133,9 @@ class NDArray:
         )
         assert self.handle is not None
         bytes_size = self.size * self.dtype.itemsize
-        self.device_handle = self.runtime.memory_allocate(bytes_size, self.memory)
+        self.device_handle = self.runtime.memory_allocate(
+            bytes_size, self.memory, self.distribution
+        )
         self.runtime.memory_copy_to(
             self.device_handle, self.handle.contents.dl_tensor.data, bytes_size
         )
