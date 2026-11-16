@@ -48,8 +48,11 @@ class MlirMppaTarget(MlirTarget):
     successful compilation, unless save_temps retains them in save_temps_dir.
     """
 
-    def __init__(self, config: MlirConfig):
+    def __init__(self, config: MlirConfig, mppa_config: MppaConfig | None = None):
         super().__init__(config)
+        self._mppa_config = (
+            mppa_config if mppa_config is not None else MppaConfig(config)
+        )
         # config.required_extensions.append("sdist")
         self._mlir_mppa_backend = MlirMppaBackend(config)
 
@@ -130,6 +133,7 @@ class MlirMppaTarget(MlirTarget):
         self._mlir_mppa_backend.link_kvx_library(
             obj_accelerator_dump_file=obj_accelerator_dump_file,
             kvx_so_dump_file=kvx_so_dump_file,
+            trace_enabled=self._mppa_config.mppa_trace_enable,
         )
 
         # Compile C code for host
@@ -220,9 +224,8 @@ class MlirMppaTarget(MlirTarget):
         graph: Graph | None = None,
         **kwargs: Any,
     ) -> itf.comp.Module:
-        mppa_config = MppaConfig(self._config)
         return MppaModule(
-            name, payload_name, file_name, file_type, mppa_config, graph, **kwargs
+            name, payload_name, file_name, file_type, self._mppa_config, graph, **kwargs
         )
 
     @override
@@ -582,7 +585,10 @@ class MlirMppaBackend:
         self._execute_command(cmd=cmd, stage="Accelerator C compilation")
 
     def link_kvx_library(
-        self, obj_accelerator_dump_file: str, kvx_so_dump_file: str
+        self,
+        obj_accelerator_dump_file: str,
+        kvx_so_dump_file: str,
+        trace_enabled: bool,
     ) -> None:
         libtensors_kernels = (
             self._mlir_mppa_path + "/include/libtensors/libtensor_tests_kernel.o"
@@ -613,19 +619,20 @@ class MlirMppaBackend:
         # ]
         # exe_process = self._execute_command(cmd=cmd)
         # assert exe_process.returncode == 0
-        try:
-            self._execute_command(
-                cmd=self.cmd_kvx_trace_util
-                + ["-s1", "-t", "kmt_kernel_0/.*", kvx_so_dump_file],
-                stage="Accelerator trace instrumentation",
-            )
-        except XtcCompileError as exc:
-            if (
-                exc.returncode != 255
-                or "Unable to find __kvx_tracepoints section" not in exc.diagnostic
-            ):
-                raise
-            print(exc.diagnostic.strip(), file=sys.stderr)
+        if trace_enabled:
+            try:
+                self._execute_command(
+                    cmd=self.cmd_kvx_trace_util
+                    + ["-s1", "-t", "kmt_kernel_0/.*", kvx_so_dump_file],
+                    stage="Accelerator trace instrumentation",
+                )
+            except XtcCompileError as exc:
+                if (
+                    exc.returncode != 255
+                    or "Unable to find __kvx_tracepoints section" not in exc.diagnostic
+                ):
+                    raise
+                print(exc.diagnostic.strip(), file=sys.stderr)
         # os.system(self.cmd_kvx_trace_util[0] + " -d long " + kvx_so_dump_file)
 
     def compile_c_host(

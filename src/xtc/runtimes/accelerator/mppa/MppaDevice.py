@@ -177,25 +177,26 @@ def _compile_runtime_lib(device: "MppaDevice") -> LibLoader:
         debug=device.config.mlir_config.debug,
         stage="MPPA runtime accelerator linking",
     )
-    try:
-        _execute_command(
-            cmd=[
-                f"{device._csw_path}/bin/kvx-trace-util",
-                "-s1",
-                "-t",
-                "kmt/.*",
-                device.config.work_dir + "/mppa_runtime_acc.so",
-            ],
-            debug=device.config.mlir_config.debug,
-            stage="MPPA runtime tracepoint insertion",
-        )
-    except XtcCompileError as exc:
-        if (
-            exc.returncode != 255
-            or "Unable to find __kvx_tracepoints section" not in exc.diagnostic
-        ):
-            raise
-        print(f"Warning: {exc.diagnostic.strip()}", file=sys.stderr)
+    if device.config.mppa_trace_enable:
+        try:
+            _execute_command(
+                cmd=[
+                    f"{device._csw_path}/bin/kvx-trace-util",
+                    "-s1",
+                    "-t",
+                    "kmt/.*",
+                    device.config.work_dir + "/mppa_runtime_acc.so",
+                ],
+                debug=device.config.mlir_config.debug,
+                stage="MPPA runtime tracepoint insertion",
+            )
+        except XtcCompileError as exc:
+            if (
+                exc.returncode != 255
+                or "Unable to find __kvx_tracepoints section" not in exc.diagnostic
+            ):
+                raise
+            print(f"Warning: {exc.diagnostic.strip()}", file=sys.stderr)
     # os.system(device._csw_path + "/bin/kvx-trace-util -d long " + device.config.work_dir + "/mppa_runtime_acc.so")
 
     # Compile host objects

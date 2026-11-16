@@ -52,7 +52,16 @@ class MlirCompiler(itf.comp.Compiler):
         elif isinstance(target, str):
             self._target = get_target_from_name(target)(self._config)
         elif isinstance(target, CommonRuntimeInterface):
-            self._target = get_target_from_name(target.target_name())(self._config)
+            if target.target_name() == "mppa":
+                from .MlirTarget.MlirMppaTarget import MlirMppaTarget
+                from xtc.runtimes.accelerator.mppa import MppaDevice
+
+                self._target = MlirMppaTarget(
+                    self._config,
+                    target.config if isinstance(target, MppaDevice) else None,
+                )
+            else:
+                self._target = get_target_from_name(target.target_name())(self._config)
         assert self._target is not None
         self._runtime_target = target
         self._compiler_kwargs = kwargs
