@@ -18,6 +18,7 @@ from .operators import (
     XTCOperRelu,
     XTCOperAdd,
     XTCOperMul,
+    XTCOperFma,
     XTCOperConv2D,
     XTCOperPad2D,
     XTCOperUnpad,
@@ -282,6 +283,11 @@ class XTCAddExpr(XTCOpExpr):
 class XTCMulExpr(XTCOpExpr):
     def __init__(self, x: XTCExpr, y: XTCExpr, **attrs: Any) -> None:
         super().__init__(XTCOperMul(**attrs), (x, y))
+
+
+class XTCFmaExpr(XTCOpExpr):
+    def __init__(self, x: XTCExpr, y: XTCExpr, z: XTCExpr, **attrs: Any) -> None:
+        super().__init__(XTCOperFma(**attrs), (x, y, z))
 
 
 class XTCConv2DExpr(XTCOpExpr):

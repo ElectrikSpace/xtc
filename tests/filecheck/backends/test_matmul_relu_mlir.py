@@ -30,6 +30,7 @@ comp = impl.get_compiler(
     dump_file="matmul_relu_mlir",
     print_source_ir=True,
     print_transformed_ir=True,
+    save_temps=True,
 )
 module = comp.compile(sched)
 executor = module.get_executor(validate=True)

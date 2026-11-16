@@ -100,3 +100,15 @@ def test_add_mul_forward():
     y = np.random.rand(4, 8).astype("float32")
     res = gb.graph.forward([XTCTensor(x), XTCTensor(y)])
     assert np.allclose(res[0].numpy(), (x + y) * y)
+
+
+def test_fma_forward():
+    import numpy as np
+    from xtc.graphs.xtc.data import XTCTensor
+
+    ts = [O.tensor((4, 8), "float32", name=n) for n in "ABC"]
+    with O.graph(name="fma") as gb:
+        O.fma(*ts, name="fma")
+    x, y, z = (np.random.rand(4, 8).astype("float32") for _ in range(3))
+    res = gb.graph.forward([XTCTensor(v) for v in (x, y, z)])
+    assert np.allclose(res[0].numpy(), x * y + z)

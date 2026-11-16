@@ -325,6 +325,60 @@ class XTCOperMul(XTCOperEltwiseBinary):
         super().__init__("mul", **attrs)
 
 
+class XTCOperFma(XTCOperator):
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("fma", **attrs)
+
+    @override
+    def get_operation(
+        self,
+        inps_types: Sequence[XTCTensorType],
+        outs_types: Sequence[XTCTensorType],
+    ) -> XTCOperation:
+        shape = inps_types[0].constant_shape
+        axes = [chr(ord("i") + n) for n in range(len(shape))]
+        return self._get_operation(
+            inps_types,
+            outs_types,
+            dims=dict(zip(axes, shape)),
+            kinds=("P",) * len(shape),
+            inps_maps=(tuple(axes),) * 3,
+            outs_maps=(tuple(axes),),
+        )
+
+    @override
+    def forward_types(
+        self, inputs_types: Sequence[TensorType]
+    ) -> Sequence[XTCTensorType]:
+        assert len(inputs_types) == 3
+        types = [cast(XTCTensorType, t) for t in inputs_types]
+        assert all(t.shape is not None for t in types)
+        assert all(t.constant_shape == types[0].constant_shape for t in types), (
+            f"incompatible shapes for fma: {[t.constant_shape for t in types]}"
+        )
+        assert all(t.dtype == types[0].dtype for t in types), (
+            f"incompatible dtypes for fma: {[t.dtype for t in types]}"
+        )
+        return [
+            XTCTensorType(
+                shape=types[0].shape, dtype=types[0].dtype, device=self.device
+            )
+        ]
+
+    @override
+    def forward(self, inputs: Sequence[Tensor]) -> Sequence[XTCTensor]:
+        expected_type = self.forward_types([inp.type for inp in inputs])[0]
+        a, b, c = (inp.numpy() for inp in inputs)
+        out = (a * b + c).astype(expected_type.constant_dtype)
+        res = XTCTensor(out)
+        res._type = XTCTensorType(
+            shape=out.shape,
+            dtype=expected_type.constant_dtype,
+            device=expected_type.device,
+        )
+        return [res]
+
+
 class XTCOperConv2D(XTCOperator):
     def __init__(self, **attrs: XTCOperatorAttr) -> None:
         super().__init__("conv2d", **attrs)

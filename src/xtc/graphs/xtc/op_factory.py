@@ -13,6 +13,7 @@ from .expr import (
     XTCReluExpr,
     XTCAddExpr,
     XTCMulExpr,
+    XTCFmaExpr,
     XTCConv2DExpr,
     XTCPad2DExpr,
     XTCUnpadExpr,
@@ -30,6 +31,7 @@ __all__ = [
     "relu",
     "add",
     "mul",
+    "fma",
     "reshape",
     "transpose",
     "tensor",
@@ -93,6 +95,16 @@ def add(a: XTCExpr, b: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExp
 def mul(a: XTCExpr, b: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
     return XTCGraphContext.append(
         XTCMulExpr(a, b, **attrs),
+        name=name,
+    )
+
+
+def fma(
+    a: XTCExpr, b: XTCExpr, c: XTCExpr, name: str | None = None, **attrs: Any
+) -> XTCExpr:
+    """Fused elementwise a * b + c."""
+    return XTCGraphContext.append(
+        XTCFmaExpr(a, b, c, **attrs),
         name=name,
     )
 
