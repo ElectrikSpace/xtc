@@ -14,6 +14,8 @@ from xdsl.dialects.builtin import (
     f32,
     f64,
     ArrayAttr,
+    IntegerAttr,
+    StringAttr,
     UnitAttr,
     DictionaryAttr,
 )
@@ -210,10 +212,12 @@ class MlirGraphBackend(MlirBackend):
         if layout is not None:
             shape = [shape[idx] for idx in layout]
 
-        if specific_xdsl_type:
-            return specific_xdsl_type(elt_type, shape)
-        else:
-            return self.xdsl_type(elt_type, shape)
+        xdsl_type = specific_xdsl_type or self.xdsl_type
+        if xdsl_type == MemRefType and type.memory is not None:
+            # 0 for global memory (ddr), 1 for the shared memory (smem)
+            memory_space = IntegerAttr(1 if type.memory == "smem" else 0, 64)
+            return MemRefType(elt_type, shape, memory_space=memory_space)
+        return xdsl_type(elt_type, shape)
 
     def _xdsl_attrs_from_tensortype(self, type: XTCTensorType):
         attrs = {}
@@ -221,6 +225,10 @@ class MlirGraphBackend(MlirBackend):
             attrs["memref.on_device"] = UnitAttr()
         if type.const:
             attrs["memref.const"] = UnitAttr()
+        if type.distribution is not None:
+            attrs["sdist.distributed"] = ArrayAttr(
+                [StringAttr(d) for d in type.distribution]
+            )
         return attrs
 
     def _np_types_spec(
