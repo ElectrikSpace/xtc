@@ -129,12 +129,25 @@ class MlirGraphBackend(MlirBackend):
             self._xdsl_type_from_tensortype(cast(XTCTensorType, tensor_type))
             for tensor_type in inputs_types
         ]
+        all_types = [cast(XTCTensorType, t) for t in [*inputs_types, *outputs_types]]
+        smem_offsets = self._smem_offsets(all_types)
         arg_attrs = ArrayAttr(
             [
                 DictionaryAttr(
-                    self._xdsl_attrs_from_tensortype(cast(XTCTensorType, tensor_type))
+                    {
+                        **self._xdsl_attrs_from_tensortype(tensor_type),
+                        **(
+                            {
+                                "kvxcluster.smem_offset": IntegerAttr.from_index_int_value(
+                                    offset
+                                )
+                            }
+                            if offset is not None
+                            else {}
+                        ),
+                    }
                 )
-                for tensor_type in [*inputs_types, *outputs_types]
+                for tensor_type, offset in zip(all_types, smem_offsets)
             ]
         )
         # graph output types are always memrefs
@@ -218,6 +231,27 @@ class MlirGraphBackend(MlirBackend):
             memory_space = IntegerAttr(1 if type.memory == "smem" else 0, 64)
             return MemRefType(elt_type, shape, memory_space=memory_space)
         return xdsl_type(elt_type, shape)
+
+    def _smem_offsets(self, types: list[XTCTensorType]) -> list[int | None]:
+        """Byte offset of each smem buffer, None for the other ones."""
+        if not any(t.memory == "smem" for t in types):
+            return [None] * len(types)
+        from mlir_sdist.extras.smem import smem_offsets
+
+        buffers = []
+        mesh: dict[str, int] = {}
+        for t in types:
+            if t.memory != "smem":
+                buffers.append(None)
+                continue
+            assert t.distribution is not None and t.device is not None
+            mesh = t.device.memory_mesh
+            elt_bytes = {"float16": 2, "float32": 4, "float64": 8}[t.constant_dtype]
+            shape = t.constant_shape
+            if t.layout is not None:
+                shape = [shape[idx] for idx in t.layout]
+            buffers.append((shape, t.distribution, elt_bytes))
+        return smem_offsets(buffers, mesh)
 
     def _xdsl_attrs_from_tensortype(self, type: XTCTensorType):
         attrs = {}
