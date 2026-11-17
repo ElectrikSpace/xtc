@@ -320,7 +320,11 @@ class XTCOperEltwiseBinary(XTCOperator):
         )
         return [
             XTCTensorType(
-                shape=t0.shape, dtype=t0.dtype, device=self.device, memory=self.memory
+                shape=t0.shape,
+                dtype=t0.dtype,
+                device=self.device,
+                memory=self.memory,
+                distribution=self.distribution,
             )
         ]
 
