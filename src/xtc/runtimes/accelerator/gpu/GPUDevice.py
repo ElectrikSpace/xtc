@@ -134,6 +134,10 @@ class GPUDevice(AcceleratorDevice):
         size_bytes: int,
         memory: str | None = None,
         distribution: list[str] | None = None,
+        *,
+        shape: tuple[int, ...] | None = None,
+        elt_bytes: int | None = None,
+        smem_offset: int | None = None,
     ) -> Any:
         self.resolve_memory(memory)
         check_memory_distribution(memory, distribution, None)

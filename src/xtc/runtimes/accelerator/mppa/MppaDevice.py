@@ -3,6 +3,7 @@
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
 import ctypes
+from dataclasses import dataclass
 import subprocess
 import logging
 import os
@@ -231,6 +232,20 @@ def _compile_runtime_lib(device: "MppaDevice") -> LibLoader:
     )
 
     return LibLoader(device.config.work_dir + "/mppa_runtime_host.so")
+
+
+@dataclass(frozen=True)
+class MppaSmemHandle:
+    """Block of a tensor distributed in the smem of the clusters.
+
+    The memory is already allocated (statically) in the smem of each cluster at
+    `offset`, so there is nothing to allocate or free.
+    """
+
+    offset: int
+    shape: tuple[int, ...]
+    elt_bytes: int
+    dim_axis: tuple[int, ...]  # memory mesh axis of each dimension, -1 for "*"
 
 
 def _check_axes(name: str, axes: dict[str, int] | None) -> dict[str, int]:
@@ -650,11 +665,15 @@ class MppaDevice(AcceleratorDevice):
         size_bytes: int,
         memory: str | None = None,
         distribution: list[str] | None = None,
+        *,
+        shape: tuple[int, ...] | None = None,
+        elt_bytes: int | None = None,
+        smem_offset: int | None = None,
     ) -> Any:
         memory = self.resolve_memory(memory)
         check_memory_distribution(memory, distribution, None)
         if memory == "smem":
-            raise NotImplementedError("smem memory is not implemented in the runtime")
+            return self._smem_handle(distribution, shape, elt_bytes, smem_offset)
         kind = self._MEMORY_KINDS[memory]
         assert self.lib_loader is not None
         # Create a memory handle
@@ -672,8 +691,78 @@ class MppaDevice(AcceleratorDevice):
         self._handle_kinds[memory_handle] = kind
         return memory_handle
 
+    def _smem_handle(
+        self,
+        distribution: list[str] | None,
+        shape: tuple[int, ...] | None,
+        elt_bytes: int | None,
+        smem_offset: int | None,
+    ) -> MppaSmemHandle:
+        if distribution is None or shape is None or elt_bytes is None:
+            raise ValueError("smem memory requires distribution, shape and elt_bytes")
+        if smem_offset is None:
+            raise ValueError("smem memory requires a smem_offset")
+        if len(distribution) != len(shape):
+            raise ValueError("distribution must have one element per dimension")
+        axes = list(self.smem_axes)
+        dim_axis: list[int] = []
+        for dim, axis in zip(shape, distribution):
+            if axis == "*":
+                dim_axis.append(-1)
+                continue
+            if axis not in self.smem_axes:
+                raise ValueError(
+                    f"distribution axis {axis!r} is not a smem axis: {axes}"
+                )
+            if dim % self.smem_axes[axis] != 0:
+                raise ValueError(
+                    f"dimension {dim} is not divisible by axis {axis!r} "
+                    f"of size {self.smem_axes[axis]}"
+                )
+            dim_axis.append(axes.index(axis))
+        return MppaSmemHandle(smem_offset, tuple(shape), elt_bytes, tuple(dim_axis))
+
+    def _smem_transfer(
+        self, handle: MppaSmemHandle, host_ptr: ctypes.c_void_p, to_smem: bool
+    ) -> None:
+        if not self.mppa_initialized:
+            self.init_device()
+        assert self.lib_loader is not None
+        name = "mppa_smem_copy_to" if to_smem else "mppa_smem_copy_from"
+        fn = getattr(self.lib_loader.lib, name)
+        fn.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int64),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int64),
+            ctypes.c_uint64,
+        ]
+        fn.restype = ctypes.c_bool
+        ndim = len(handle.shape)
+        mesh = list(self.smem_axes.values())
+        shape_c = (ctypes.c_int64 * ndim)(*handle.shape)
+        dim_axis_c = (ctypes.c_int * ndim)(*handle.dim_axis)
+        mesh_c = (ctypes.c_int64 * len(mesh))(*mesh)
+        if not fn(
+            host_ptr,
+            handle.elt_bytes,
+            ndim,
+            shape_c,
+            dim_axis_c,
+            len(mesh),
+            mesh_c,
+            handle.offset,
+        ):
+            direction = "to" if to_smem else "from"
+            raise Exception(f"Failed to copy memory {direction} the smem")
+
     @override
     def memory_free(self, handle: Any) -> None:
+        if isinstance(handle, MppaSmemHandle):
+            return
         if not self.mppa_initialized:
             self.init_device()
         assert self.lib_loader is not None
@@ -696,6 +785,9 @@ class MppaDevice(AcceleratorDevice):
     def memory_copy_to(
         self, acc_handle: Any, src: ctypes.c_void_p, size_bytes: int
     ) -> None:
+        if isinstance(acc_handle, MppaSmemHandle):
+            self._smem_transfer(acc_handle, src, to_smem=True)
+            return
         if not self.mppa_initialized:
             self.init_device()
         assert self.lib_loader is not None
@@ -710,6 +802,9 @@ class MppaDevice(AcceleratorDevice):
     def memory_copy_from(
         self, acc_handle: Any, dst: ctypes.c_void_p, size_bytes: int
     ) -> None:
+        if isinstance(acc_handle, MppaSmemHandle):
+            self._smem_transfer(acc_handle, dst, to_smem=False)
+            return
         if not self.mppa_initialized:
             self.init_device()
         assert self.lib_loader is not None
@@ -726,6 +821,10 @@ class MppaDevice(AcceleratorDevice):
 
     @override
     def memory_fill_zero(self, acc_handle: Any, size_bytes: int) -> None:
+        if isinstance(acc_handle, MppaSmemHandle):
+            zeros = (ctypes.c_char * size_bytes)()
+            self._smem_transfer(acc_handle, ctypes.cast(zeros, ctypes.c_void_p), True)
+            return
         if not self.mppa_initialized:
             self.init_device()
         assert self.lib_loader is not None
@@ -737,6 +836,9 @@ class MppaDevice(AcceleratorDevice):
 
     @override
     def memory_data_pointer(self, acc_handle: Any) -> ctypes.c_void_p:
+        if isinstance(acc_handle, MppaSmemHandle):
+            # Not used by the kernels, which find the block at its static smem offset
+            return ctypes.c_void_p(acc_handle.offset)
         if not self.mppa_initialized:
             self.init_device()
         assert self.lib_loader is not None

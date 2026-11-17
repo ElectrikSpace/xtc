@@ -109,6 +109,10 @@ class AcceleratorDevice(CommonRuntimeInterface, ABC):
         size_bytes: int,
         memory: str | None = None,
         distribution: list[str] | None = None,
+        *,
+        shape: tuple[int, ...] | None = None,
+        elt_bytes: int | None = None,
+        smem_offset: int | None = None,
     ) -> Any:
         """Allocate memory on the accelerator device.
 
@@ -118,6 +122,12 @@ class AcceleratorDevice(CommonRuntimeInterface, ABC):
                 "global" (alias "ddr") is the device default memory.
             distribution (list[str] | None): The distribution of the tensor dimensions,
                 mandatory for (and only valid with) the "smem" memory.
+            shape (tuple[int, ...] | None): The full tensor shape, used by the "smem"
+                memory.
+            elt_bytes (int | None): The size in bytes of a tensor element, used by
+                the "smem" memory.
+            smem_offset (int | None): The byte offset of the block in the smem of
+                each memory, used by the "smem" memory (already allocated there).
 
         Returns:
             A handle or reference to the allocated memory.

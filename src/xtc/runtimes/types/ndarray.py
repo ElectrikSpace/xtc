@@ -47,6 +47,7 @@ class NDArray:
         layout: list[int] | None = None,
         memory: str | None = None,
         distribution: list[str] | None = None,
+        smem_offset: int | None = None,
     ) -> None:
         if not self.rev_np_dtype_map:
             self.rev_np_dtype_map.update(
@@ -62,6 +63,7 @@ class NDArray:
         self.layout = layout
         self.memory = memory
         self.distribution = distribution
+        self.smem_offset = smem_offset
         if isinstance(array, np.ndarray):
             check_memory_distribution(memory, distribution, array.ndim)
         if isinstance(self.runtime, AcceleratorDevice):
@@ -133,8 +135,16 @@ class NDArray:
         )
         assert self.handle is not None
         bytes_size = self.size * self.dtype.itemsize
+        smem_args: dict[str, Any] = {}
+        if self.memory == "smem":
+            assert self.layout is None, "layout is not supported for smem tensors"
+            smem_args = {
+                "shape": self.shape,
+                "elt_bytes": self.dtype.itemsize,
+                "smem_offset": self.smem_offset,
+            }
         self.device_handle = self.runtime.memory_allocate(
-            bytes_size, self.memory, self.distribution
+            bytes_size, self.memory, self.distribution, **smem_args
         )
         self.runtime.memory_copy_to(
             self.device_handle, self.handle.contents.dl_tensor.data, bytes_size

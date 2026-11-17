@@ -10,12 +10,20 @@ from xtc.utils.numpy import np_init
 from xtc.runtimes.types.ndarray import NDArray
 from xtc.graphs.xtc.graph import XTCGraph
 from xtc.graphs.xtc.expr import XTCTensorExpr
-from xtc.graphs.xtc.data import XTCTensor
+from xtc.graphs.xtc.data import XTCTensor, XTCTensorType
 from xtc.utils.cfunc import CFunc
+from xtc.utils.smem import graph_smem_offsets
 from xtc.itf.runtime.common import CommonRuntimeInterface
 from xtc.runtimes.host.HostRuntime import HostRuntime
 
 __all__: list[str] = []
+
+
+def _graph_smem_offsets(graph: Graph) -> list[int | None]:
+    # Same order as the arguments of the generated function
+    assert isinstance(graph, XTCGraph)
+    types = [*(graph.inputs_types or []), *(graph.outputs_types or [])]
+    return graph_smem_offsets(cast(list[XTCTensorType], types))
 
 
 def graph_np_inputs_spec(graph: Graph) -> Callable[[], list[dict[str, Any]]]:
@@ -31,6 +39,7 @@ def graph_np_inputs_spec(graph: Graph) -> Callable[[], list[dict[str, Any]]]:
         inputs_types = [
             cast(XTCTensorExpr, node._expr).type for node in graph.inputs_nodes
         ]
+        offsets = _graph_smem_offsets(graph)[: len(inputs_types)]
         return [
             {
                 "shape": type.constant_shape,
@@ -39,8 +48,9 @@ def graph_np_inputs_spec(graph: Graph) -> Callable[[], list[dict[str, Any]]]:
                 "layout": type.layout,
                 "memory": type.memory,
                 "distribution": type.distribution,
+                "smem_offset": offset,
             }
-            for type in inputs_types
+            for type, offset in zip(inputs_types, offsets)
         ]
 
     return _graph_np_inputs_spec
@@ -53,6 +63,7 @@ def graph_np_outputs_spec(graph: Graph) -> Callable[[], list[dict[str, Any]]]:
     )
 
     def _graph_np_outputs_spec() -> list[dict[str, Any]]:
+        offsets = _graph_smem_offsets(graph)[len(graph.inputs_types or []) :]
         return [
             {
                 "shape": type.constant_shape,
@@ -60,10 +71,12 @@ def graph_np_outputs_spec(graph: Graph) -> Callable[[], list[dict[str, Any]]]:
                 "device": type.device,
                 "memory": type.memory,
                 "distribution": type.distribution,
+                "smem_offset": offset,
             }
-            for type in [
-                cast(list, node._outputs_types)[0] for node in graph.outputs_nodes
-            ]
+            for type, offset in zip(
+                [cast(list, node._outputs_types)[0] for node in graph.outputs_nodes],
+                offsets,
+            )
         ]
 
     return _graph_np_outputs_spec
@@ -97,13 +110,21 @@ def ensure_ndarray_parameters(
                     **{
                         k: v
                         for k, v in spec.items()
-                        if k not in ("device", "layout", "memory", "distribution")
+                        if k
+                        not in (
+                            "device",
+                            "layout",
+                            "memory",
+                            "distribution",
+                            "smem_offset",
+                        )
                     }
                 ),
                 spec["device"] if "device" in spec else HostRuntime.get(),
                 spec["layout"] if "layout" in spec else None,
                 spec["memory"] if "memory" in spec else None,
                 spec["distribution"] if "distribution" in spec else None,
+                spec["smem_offset"] if "smem_offset" in spec else None,
             )
             for spec in inputs_spec
         ]
@@ -112,7 +133,8 @@ def ensure_ndarray_parameters(
                 **{
                     k: v
                     for k, v in spec.items()
-                    if k not in ("device", "layout", "memory", "distribution")
+                    if k
+                    not in ("device", "layout", "memory", "distribution", "smem_offset")
                 }
             )
             for spec in outputs_spec
@@ -127,6 +149,7 @@ def ensure_ndarray_parameters(
                     distribution=spec["distribution"]
                     if "distribution" in spec
                     else None,
+                    smem_offset=spec["smem_offset"] if "smem_offset" in spec else None,
                 )
                 for out, spec in zip(outputs, outputs_spec)
             ],
