@@ -7,6 +7,7 @@ from typing import Literal
 
 from typing_extensions import override
 from dataclasses import dataclass, asdict, field
+from xtc.itf.runtime.accelerator import AcceleratorDevice
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
 from xtc.utils.pad import PadStrategiesArg
 from xtc.schedules.loop_names import make_loop_name
@@ -45,12 +46,20 @@ class MlirNodeScheduler:
         loop_stamps: list[str] = [],
         dim_sizes: dict[str, int] | None = None,
         reduction_dims: list[str] | None = None,
+        device: AcceleratorDevice | None = None,
     ) -> None:
         self._plain_sch = PlainNodeScheduler(
             node_name,
             node_ident,
             dims,
         )
+        # Meshes defined at device creation take precedence over explicit ones
+        self.mesh_from_device = False
+        if device is not None and device.memory_mesh:
+            self._plain_sch.memory_mesh = dict(device.memory_mesh)
+            self.mesh_from_device = True
+            if device.processor_mesh:
+                self._plain_sch.processor_mesh = dict(device.processor_mesh)
         self._dim_sizes = dim_sizes
         self._reduction_dims = list(reduction_dims or [])
         self._read_rotates: dict[str, list[dict]] = {}
@@ -111,10 +120,19 @@ class MlirNodeScheduler:
     ):
         self._plain_sch.pack_at(axis, input_idx, mtype, pad, root, pad_strategies)
 
+    def _check_mesh_not_from_device(self) -> None:
+        if self.mesh_from_device:
+            raise ValueError(
+                "Memory/processor meshes are already defined by the device "
+                "options (e.g. smem_axes/pe_axes)"
+            )
+
     def define_memory_mesh(self, axes: dict[str, int]):
+        self._check_mesh_not_from_device()
         self._plain_sch.define_memory_mesh(axes)
 
     def define_processor_mesh(self, axes: dict[str, int]):
+        self._check_mesh_not_from_device()
         self._plain_sch.define_processor_mesh(axes)
 
     def distribute(self, axis: str, processor_axis: str, root: str = DEFAULT_ROOT):

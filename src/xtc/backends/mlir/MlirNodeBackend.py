@@ -10,6 +10,7 @@ from xdsl.dialects.builtin import MemRefType, TensorType
 from xdsl.dialects.builtin import UnitAttr as xdslUnitAttr
 from xtc.utils.xdsl_aux import xdsl_operator_to_function
 
+from xtc.itf.runtime.accelerator import AcceleratorDevice
 from .MlirBackend import MlirBackend
 
 
@@ -28,8 +29,10 @@ class MlirNodeBackend(MlirBackend):
         id: str | None = None,
         xdsl_type: Type[TensorType] | Type[MemRefType] = MemRefType,
         reduction_dims: list[str] | None = None,
+        device: AcceleratorDevice | None = None,
     ):
         self._graph = None
+        self.device = device
         self.xdsl_type = xdsl_type
         if id is None:
             self.op_id_attribute = f"__id{MlirNodeBackend.count}__"

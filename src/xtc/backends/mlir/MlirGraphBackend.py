@@ -171,6 +171,10 @@ class MlirGraphBackend(MlirBackend):
             region=region,
             arg_attrs=arg_attrs,
         )
+        io_types = [cast(XTCTensorType, t) for t in [*inputs_types, *outputs_types]]
+        devices = {id(t.device): t.device for t in io_types if t.device is not None}
+        assert len(devices) <= 1, "all graph tensors must share the same device"
+        device = next(iter(devices.values()), None)
         nodes_dict = {}
         for attrs in block_attrs:
             reductions = attrs.get("reduction_dims", [])
@@ -187,6 +191,7 @@ class MlirGraphBackend(MlirBackend):
                     concluding_passes=concluding_passes,
                     id=f"__xtc_id_{node_id}_",
                     xdsl_type=self.xdsl_type,
+                    device=device,
                 )
         return payload, nodes_dict
 

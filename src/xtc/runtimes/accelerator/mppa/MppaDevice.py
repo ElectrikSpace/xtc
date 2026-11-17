@@ -233,6 +233,14 @@ def _compile_runtime_lib(device: "MppaDevice") -> LibLoader:
     return LibLoader(device.config.work_dir + "/mppa_runtime_host.so")
 
 
+def _check_axes(name: str, axes: dict[str, int] | None) -> dict[str, int]:
+    axes = dict(axes or {})
+    for axis, size in axes.items():
+        if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+            raise ValueError(f"{name}[{axis!r}] must be a positive integer: {size!r}")
+    return axes
+
+
 class MppaDevice(AcceleratorDevice):
     """A class for Mppa device"""
 
@@ -242,10 +250,15 @@ class MppaDevice(AcceleratorDevice):
     def __new__(cls, *args: Any, **kwargs: Any) -> "MppaDevice":
         if cls._instance is None:
             cls._instance = super(MppaDevice, cls).__new__(cls)
-            cls._instance.__init_once__(*args)
+            cls._instance.__init_once__(*args, **kwargs)
         return cls._instance
 
-    def __init__(self, config: MppaConfig | None = None):
+    def __init__(
+        self,
+        config: MppaConfig | None = None,
+        smem_axes: dict[str, int] | None = None,
+        pe_axes: dict[str, int] | None = None,
+    ):
         try:
             import mlir_mppa
         except ImportError:
@@ -263,16 +276,49 @@ class MppaDevice(AcceleratorDevice):
             raise ValueError(
                 "MppaDevice already initialized with a different configuration"
             )
+        if (smem_axes is not None and smem_axes != self.smem_axes) or (
+            pe_axes is not None and pe_axes != self.pe_axes
+        ):
+            raise ValueError(
+                "MppaDevice already initialized with different smem_axes/pe_axes"
+            )
 
-    def __init_once__(self, config: MppaConfig | None = None):
+    def __init_once__(
+        self,
+        config: MppaConfig | None = None,
+        smem_axes: dict[str, int] | None = None,
+        pe_axes: dict[str, int] | None = None,
+    ):
+        self.mppa_initialized: bool = False
         if config is None:
             config = MppaConfig()
+        self.smem_axes: dict[str, int] = _check_axes("smem_axes", smem_axes)
+        self.pe_axes: dict[str, int] = _check_axes("pe_axes", pe_axes)
+        common = self.smem_axes.keys() & self.pe_axes.keys()
+        if common:
+            raise ValueError(
+                f"smem_axes and pe_axes must have distinct names: {sorted(common)}"
+            )
+        if self.pe_axes and not self.smem_axes:
+            raise ValueError("pe_axes requires smem_axes to be defined")
         self.config: MppaConfig = config
         self.lib_loader: LibLoader | None = None
         self.mppa_initialized: bool = False
         self.loaded_kernels: dict[Module, LibLoader] = {}
         self.calls_counter: int = 0
         self.need_rebuild: bool = False
+
+    @property
+    @override
+    def memory_mesh(self) -> dict[str, int]:
+        """Memory mesh defined by the device options (the smem axes)."""
+        return dict(self.smem_axes)
+
+    @property
+    @override
+    def processor_mesh(self) -> dict[str, int]:
+        """Processor mesh defined by the device options (smem axes then pe axes)."""
+        return {**self.smem_axes, **self.pe_axes}
 
     def __build_runtime_lib(self) -> LibLoader:
         os.system("mkdir -p " + self.config.work_dir)

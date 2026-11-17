@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+import warnings
+
 from typing_extensions import override
 
 from xtc.itf.schd.scheduler import DEFAULT_ROOT
@@ -77,7 +79,13 @@ class MlirScheduler(itf.schd.Scheduler):
                 loop_stamps=backend.loop_stamps,
                 dim_sizes=backend.dim_sizes,
                 reduction_dims=backend.reduction_dims,
+                device=backend.device,
             )
+
+        if any(
+            sch._current_scheduler.mesh_from_device for sch in self._nodes_schedulers
+        ):
+            self._require_extension("sdist")
 
     @property
     def _default_node_name(self) -> str:
@@ -219,11 +227,25 @@ class MlirScheduler(itf.schd.Scheduler):
 
     @override
     def define_memory_mesh(self, axes: dict[str, int]) -> None:
+        """Deprecated: meshes are defined by the device options (e.g. MppaDevice)."""
+        warnings.warn(
+            "define_memory_mesh is deprecated: meshes are set from the device "
+            "options at device creation",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._require_extension("sdist")
         self._current_scheduler.define_memory_mesh(axes)
 
     @override
     def define_processor_mesh(self, axes: dict[str, int]) -> None:
+        """Deprecated: meshes are defined by the device options (e.g. MppaDevice)."""
+        warnings.warn(
+            "define_processor_mesh is deprecated: meshes are set from the device "
+            "options at device creation",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._require_extension("sdist")
         self._current_scheduler.define_processor_mesh(axes)
 

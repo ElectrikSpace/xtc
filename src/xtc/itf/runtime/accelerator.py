@@ -40,6 +40,16 @@ def check_memory_distribution(
 class AcceleratorDevice(CommonRuntimeInterface, ABC):
     """Abstract interface for an accelerator device (such as GPU, MPPA, etc)."""
 
+    @property
+    def memory_mesh(self) -> dict[str, int]:
+        """Memory mesh defined by the device options (empty if none)."""
+        return {}
+
+    @property
+    def processor_mesh(self) -> dict[str, int]:
+        """Processor mesh defined by the device options (empty if none)."""
+        return {}
+
     @abstractmethod
     def detect_accelerator(self) -> bool:
         """Detect if the accelerator device is available.

@@ -305,6 +305,10 @@ class Scheduler(ABC):
     def define_memory_mesh(self, axes: dict[str, int]) -> None:
         """Define a memory mesh.
 
+        Deprecated: prefer defining meshes at device creation (e.g. the
+        smem_axes/pe_axes options of MppaDevice). Raises if the device already
+        defined the meshes.
+
         Args:
             axes: dictionary where keys are axes names and values are the number of memories along each axis
         """
@@ -313,6 +317,10 @@ class Scheduler(ABC):
     @abstractmethod
     def define_processor_mesh(self, axes: dict[str, int]) -> None:
         """Define a processor mesh. It must be a superset of the memory mesh.
+
+        Deprecated: prefer defining meshes at device creation (e.g. the
+        smem_axes/pe_axes options of MppaDevice). Raises if the device already
+        defined the meshes.
 
         Args:
             axes: dictionary where keys are axes names and values are the number of processors along each axis
