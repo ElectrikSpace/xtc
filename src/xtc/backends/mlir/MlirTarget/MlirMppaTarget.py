@@ -514,6 +514,7 @@ class MlirMppaBackend:
         # passes.append("kalray-apply-instrumentation{use-traces=true}")
         passes.append("func.func(kvxcluster-outline-kernels{specialize=true})")
         passes.append("func.func(canonicalize)")
+        passes.append("func.func(kvxcluster-mark-dma-loopback)")
 
         new_passes = []
         for p in passes:
