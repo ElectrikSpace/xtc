@@ -3,6 +3,7 @@
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
 import warnings
+from typing import TYPE_CHECKING, cast
 
 from typing_extensions import override
 
@@ -16,7 +17,11 @@ import xtc.backends.mlir as backend
 
 from .MlirNodeScheduler import MlirNodeScheduler, MlirNodeSchedule
 from xtc.schedules.loop_names import basename
-from .MlirScheduleValidator import validate_node_schedule
+
+if TYPE_CHECKING:
+    from .MlirGraphBackend import MlirGraphBackend
+
+from .MlirScheduleValidator import validate_distributed_buffers, validate_node_schedule
 
 __all__ = [
     "MlirScheduler",
@@ -305,6 +310,10 @@ class MlirSchedule(itf.schd.Schedule):
         """Validate all nodes before using this schedule for code generation."""
         for node_schedule in self._nodes_schedules:
             validate_node_schedule(node_schedule)
+            validate_distributed_buffers(
+                node_schedule,
+                cast("MlirGraphBackend", self._scheduler.backend),
+            )
 
     @property
     @override

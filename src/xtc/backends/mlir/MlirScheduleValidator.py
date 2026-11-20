@@ -5,11 +5,15 @@
 """Validation of MLIR schedule transformations before code generation."""
 
 from collections import Counter
+from typing import TYPE_CHECKING, cast
 
 from xtc.schedules.exceptions import ScheduleValidationError
 
 from xtc.schedules.loop_names import basename, make_loop_name, parent_name
 from .MlirNodeScheduler import MlirNodeSchedule
+
+if TYPE_CHECKING:
+    from .MlirGraphBackend import MlirGraphBackend
 
 
 def validate_node_schedule(schedule: MlirNodeSchedule) -> None:
@@ -221,3 +225,69 @@ def _check_no_reduction_distribution(schedule: MlirNodeSchedule) -> None:
                 root=parent_name(axis),
                 dimension=dim,
             )
+
+
+def validate_distributed_buffers(
+    schedule: MlirNodeSchedule, graph_backend: "MlirGraphBackend"
+) -> None:
+    """Reject distributed operands that are never buffered locally.
+
+    A distributed operand (function argument with a distribution, or result of
+    distributed_buffer_at) must be accessed through a pack_at/buffer_at placed
+    after its distribution point.
+    """
+    from .MlirNodeBackend import MlirNodeBackend
+    from .MlirLocalPartitionView import operand_distribution
+
+    if not schedule.permutation:
+        return
+    node_backend = cast(MlirNodeBackend, graph_backend.nodes[schedule.node_name])
+    # Inputs may be scalars (e.g. linalg.fill), so count operands, not tensor specs
+    # Initialisers only write their own partition of the output
+    if node_backend.source_op.name == "linalg.fill":
+        return
+    output_idx = len(node_backend.source_op.inputs)  # type: ignore
+    # Loops (in order) where each operand is buffered locally
+    buffered: dict[int, set[str]] = {}
+    for loop, entries in schedule.packed_buffers.items():
+        for input_idx, _, _ in entries:
+            buffered.setdefault(input_idx, set()).add(loop)
+    for loop in schedule.write_buffers:
+        buffered.setdefault(output_idx, set()).add(loop)
+
+    # Operand -> loops where it is distributed (None: function argument)
+    origins: dict[int, list[str | None]] = {}
+    for idx in range(output_idx + 1):
+        if operand_distribution(graph_backend, node_backend, idx) is not None:
+            origins.setdefault(idx, []).append(None)
+    for loop, entries in schedule.distributed_buffers.items():
+        for entry in entries:
+            origins.setdefault(entry["input_idx"], []).append(loop)
+    if not origins:
+        return
+
+    for idx, loops in origins.items():
+        for origin in loops:
+            if _has_inner_buffer(schedule, buffered.get(idx, set()), origin):
+                continue
+            where = "" if origin is None else f" at {origin}"
+            kind = "buffer_at" if idx == output_idx else "pack_at"
+            raise ScheduleValidationError(
+                f"Distributed operand {idx}{where} has no inner {kind}; "
+                "a distributed buffer must be copied to a local buffer "
+                "(pack_at/buffer_at) inside its distribution point.",
+                node=schedule.node_name,
+            )
+
+
+def _has_inner_buffer(
+    schedule: MlirNodeSchedule, buffer_loops: set[str], origin: str | None
+) -> bool:
+    for perm in schedule.permutation.values():
+        if origin is not None and origin not in perm:
+            continue
+        # Loops strictly after the distribution point (whole nest for arguments)
+        after = perm if origin is None else perm[perm.index(origin) + 1 :]
+        if buffer_loops & set(after):
+            return True
+    return False

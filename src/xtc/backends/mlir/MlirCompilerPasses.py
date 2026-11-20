@@ -840,6 +840,36 @@ class MlirProgramInsertTransformPass:
         ]
         return window, fill, alloc, multiples
 
+    def _is_view_on_local_partition(
+        self,
+        schedule: MlirNodeSchedule,
+        operand_idx: int,
+        *,
+        root: str,
+        buffer_loop: str,
+        tiles_sizes_by_loops: dict[str, list[int]],
+    ) -> bool:
+        from .MlirGraphBackend import MlirGraphBackend
+        from .MlirNodeBackend import MlirNodeBackend
+        from .MlirLocalPartitionView import (
+            is_view_on_local_partition,
+            operand_distribution,
+        )
+
+        assert self._mlir_schedule is not None
+        graph_backend = cast(MlirGraphBackend, self._mlir_schedule.scheduler.backend)
+        node_backend = cast(MlirNodeBackend, graph_backend.nodes[schedule.node_name])
+        return is_view_on_local_partition(
+            schedule,
+            root=root,
+            buffer_loop=buffer_loop,
+            operand_idx=operand_idx,
+            tiles_sizes_by_loops=tiles_sizes_by_loops,
+            node_backend=node_backend,
+            distribution=operand_distribution(graph_backend, node_backend, operand_idx),
+            memory_mesh=schedule.memory_mesh,
+        )
+
     def _local_buffer(
         self,
         schedule: MlirNodeSchedule,
@@ -872,6 +902,13 @@ class MlirProgramInsertTransformPass:
             target=sched_state.handle,
             input_idx=operand_idx,
             pad=alloc if pad else None,
+            view_on_local_partition=self._is_view_on_local_partition(
+                schedule,
+                operand_idx,
+                root=root,
+                buffer_loop=buffer_loop,
+                tiles_sizes_by_loops=tiles_sizes_by_loops,
+            ),
         )
         # With ``pad_partial_tiles``, the dynamic window is only zero filled up
         # to the multiple of the zero divisibility constraints: the rest of the
@@ -889,9 +926,7 @@ class MlirProgramInsertTransformPass:
                 multiples=multiples if round_up else None,
             )
         elif pad and has_pad_partial_tiles(strategies):
-            sdist_transform.SDistPadShapeOp(
-                sched_state.handle, operand_idx, sizes=fill
-            )
+            sdist_transform.SDistPadShapeOp(sched_state.handle, operand_idx, sizes=fill)
 
     def _pack_buffer(
         self,
