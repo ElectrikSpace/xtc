@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing_extensions import override
 from typing import Any, Type, TypeAlias, cast
 
-from xdsl.dialects import linalg, arith, builtin, memref, tensor, scf
+from xdsl.dialects import linalg, arith, builtin, memref, tensor, scf, math
 from xdsl.dialects.builtin import (
     MemRefType,
     TensorType,
@@ -961,6 +961,154 @@ class MlirOperatorFma(MlirOperator):
         return (self.args[-1],)
 
 
+class MlirOperatorEltwiseUnary(MlirOperator):
+    """Elementwise unary function; the body is given by the ``body`` method."""
+
+    AXES = "ijklmnopqrstuvwxyz"
+    KINDS = "PPPPPPPPPPPPPPPPPP"
+    ELT_TYPES = {"float16": f16, "float32": f32, "float64": f64}
+
+    def _in_dtype(self) -> str:
+        return self.args[-1]
+
+    def _out_dtype(self) -> str:
+        return self.args[-1]
+
+    def _shape(self) -> list[int]:
+        return list(self.args[:-1])
+
+    @staticmethod
+    def body(x: SSAValue, elt_in: Any, elt_out: Any) -> SSAValue:
+        raise NotImplementedError
+
+    @override
+    def dims(self, kind: str = "") -> tuple[str, ...]:
+        return self._dims(kind)[: len(self._shape())]
+
+    @override
+    def dims_sizes(self) -> dict[str, int]:
+        return {name: size for name, size in zip(self.AXES, self._shape())}
+
+    @override
+    def generate_op(
+        self, block: Block | None = None, args: Sequence[BlockArgument] = []
+    ) -> tuple[Block, OpAttrs]:
+        shape = self._shape()
+        rank = len(shape)
+        elt_in = self.ELT_TYPES[self._in_dtype()]
+        elt_out = self.ELT_TYPES[self._out_dtype()]
+        if block is None:
+            block = Block(
+                arg_types=[self.op_type(elt_in, shape), self.op_type(elt_out, shape)]
+            )
+            args = block.args
+        assert len(args) == 2
+        assert all(isinstance(arg.type, self.op_type) for arg in args)
+        with ImplicitBuilder(block):
+            ident = AffineMapAttr(AffineMap.identity(rank))
+            result = (args[1].type,) if self.op_type == TensorType else ()
+            block_in = Block(arg_types=[elt_in, elt_out])
+            with ImplicitBuilder(block_in):
+                res = self.body(block_in.args[0], elt_in, elt_out)
+                linalg.YieldOp(res)
+            node = linalg.GenericOp(
+                inputs=(args[0],),
+                outputs=(args[1],),
+                body=Region([block_in]),  # type: ignore # mypy issue with dataclass
+                indexing_maps=[ident, ident],
+                iterator_types=[StringAttr("parallel")] * rank,
+                result_types=result,
+            )
+        node_id = f"{self.name}"
+        node.attributes[f"__xtc_id_{node_id}_"] = UnitAttr()
+        attrs = {
+            "nodes_map": {node_id: node},
+            "dims_sizes": [self.dims_sizes()],
+            "output_nodes": [node],
+        }
+        return block, attrs
+
+    @override
+    def inputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        return (tuple(self._shape()),)
+
+    @override
+    def inputs_types(self) -> tuple[str, ...]:
+        return (self._in_dtype(),)
+
+    @override
+    def outputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        return (tuple(self._shape()),)
+
+    @override
+    def outputs_types(self) -> tuple[str, ...]:
+        return (self._out_dtype(),)
+
+
+class MlirOperatorExp(MlirOperatorEltwiseUnary):
+    DEFAULT_NAME = "exp"
+
+    @staticmethod
+    @override
+    def body(x: SSAValue, elt_in: Any, elt_out: Any) -> SSAValue:
+        return math.ExpOp(x).result
+
+
+class MlirOperatorRsqrt(MlirOperatorEltwiseUnary):
+    DEFAULT_NAME = "rsqrt"
+
+    @staticmethod
+    @override
+    def body(x: SSAValue, elt_in: Any, elt_out: Any) -> SSAValue:
+        return math.RsqrtOp(x).result
+
+
+class MlirOperatorSilu(MlirOperatorEltwiseUnary):
+    DEFAULT_NAME = "silu"
+
+    @staticmethod
+    @override
+    def body(x: SSAValue, elt_in: Any, elt_out: Any) -> SSAValue:
+        neg = arith.NegfOp(x)
+        ex = math.ExpOp(neg.result)
+        one = arith.ConstantOp(builtin.FloatAttr(1.0, elt_in))
+        den = arith.AddfOp(one.result, ex.result)
+        return arith.DivfOp(x, den.result).result
+
+
+class MlirOperatorCast(MlirOperatorEltwiseUnary):
+    DEFAULT_NAME = "cast"
+
+    @classmethod
+    @override
+    def args_from_operation(
+        cls, xtc_op: Operation, args: tuple[Any, ...]
+    ) -> tuple[Any, ...]:
+        _require_natural_layouts(xtc_op)
+        return (*args, xtc_op.outputs_types[0].dtype)
+
+    @override
+    def _out_dtype(self) -> str:
+        return self.args[-1]
+
+    @override
+    def _in_dtype(self) -> str:
+        return self.args[-2]
+
+    @override
+    def _shape(self) -> list[int]:
+        return list(self.args[:-2])
+
+    @staticmethod
+    @override
+    def body(x: SSAValue, elt_in: Any, elt_out: Any) -> SSAValue:
+        if elt_in == elt_out:
+            return x
+        bits = {f16: 16, f32: 32, f64: 64}
+        op = arith.TruncFOp if bits[elt_out] < bits[elt_in] else arith.ExtFOp
+        return op(x, elt_out).result
+
+
 class MlirOperatorPad2D(MlirOperatorPad):
     DEFAULT_NAME = "pad2d"
     AXES = "bhwc"
@@ -1291,6 +1439,10 @@ class MlirOperators:
     add = MlirOperatorAdd
     mul = MlirOperatorMul
     fma = MlirOperatorFma
+    exp = MlirOperatorExp
+    rsqrt = MlirOperatorRsqrt
+    silu = MlirOperatorSilu
+    cast = MlirOperatorCast
     pad2d = MlirOperatorPad2D
     unpad = MlirOperatorUnpad
     pad = MlirOperatorPad

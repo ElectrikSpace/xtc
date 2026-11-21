@@ -15,6 +15,10 @@ from .expr import (
     XTCAddExpr,
     XTCMulExpr,
     XTCFmaExpr,
+    XTCExpExpr,
+    XTCRsqrtExpr,
+    XTCSiluExpr,
+    XTCCastExpr,
     XTCConv2DExpr,
     XTCPad2DExpr,
     XTCUnpadExpr,
@@ -34,6 +38,10 @@ __all__ = [
     "add",
     "mul",
     "fma",
+    "exp",
+    "rsqrt",
+    "silu",
+    "cast",
     "reshape",
     "transpose",
     "tensor",
@@ -116,6 +124,24 @@ def fma(
         XTCFmaExpr(a, b, c, **attrs),
         name=name,
     )
+
+
+def exp(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
+    return XTCGraphContext.append(XTCExpExpr(inp, **attrs), name=name)
+
+
+def rsqrt(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
+    return XTCGraphContext.append(XTCRsqrtExpr(inp, **attrs), name=name)
+
+
+def silu(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
+    """Elementwise x * sigmoid(x)."""
+    return XTCGraphContext.append(XTCSiluExpr(inp, **attrs), name=name)
+
+
+def cast(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
+    """Elementwise conversion to the dtype attribute."""
+    return XTCGraphContext.append(XTCCastExpr(inp, **attrs), name=name)
 
 
 def reshape(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:

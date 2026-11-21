@@ -481,6 +481,121 @@ class XTCOperFma(XTCOperator):
         return [res]
 
 
+class XTCOperEltwiseUnary(XTCOperator):
+    """Elementwise float function of one tensor, same shape and dtype."""
+
+    NP_FUNC: Any = None
+
+    @override
+    def get_operation(
+        self,
+        inps_types: Sequence[XTCTensorType],
+        outs_types: Sequence[XTCTensorType],
+    ) -> XTCOperation:
+        shape = inps_types[0].constant_shape
+        axes = [chr(ord("i") + n) for n in range(len(shape))]
+        return self._get_operation(
+            inps_types,
+            outs_types,
+            dims=dict(zip(axes, shape)),
+            kinds=("P",) * len(shape),
+            inps_maps=(tuple(axes),),
+            outs_maps=(tuple(axes),),
+        )
+
+    @override
+    def forward_types(
+        self, inputs_types: Sequence[TensorType]
+    ) -> Sequence[XTCTensorType]:
+        assert len(inputs_types) == 1
+        t0 = cast(XTCTensorType, inputs_types[0])
+        assert t0.shape is not None
+        return [
+            XTCTensorType(
+                shape=t0.shape,
+                dtype=t0.dtype,
+                device=self.device,
+                memory=self.memory,
+                distribution=self.distribution,
+            )
+        ]
+
+    @override
+    def forward(self, inputs: Sequence[Tensor]) -> Sequence[XTCTensor]:
+        expected_type = self.forward_types([inp.type for inp in inputs])[0]
+        x = inputs[0].numpy().astype(np.float32)
+        out = type(self).NP_FUNC(x).astype(expected_type.constant_dtype)
+        res = XTCTensor(out)
+        res._type = XTCTensorType(
+            shape=out.shape,
+            dtype=expected_type.constant_dtype,
+            device=expected_type.device,
+            memory=expected_type.memory,
+            distribution=expected_type.distribution,
+        )
+        return [res]
+
+
+class XTCOperExp(XTCOperEltwiseUnary):
+    NP_FUNC = staticmethod(np.exp)
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("exp", **attrs)
+
+
+class XTCOperRsqrt(XTCOperEltwiseUnary):
+    NP_FUNC = staticmethod(lambda x: 1.0 / np.sqrt(x))
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("rsqrt", **attrs)
+
+
+class XTCOperSilu(XTCOperEltwiseUnary):
+    NP_FUNC = staticmethod(lambda x: x / (1.0 + np.exp(-x)))
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("silu", **attrs)
+
+
+class XTCOperCast(XTCOperEltwiseUnary):
+    """Convert to the ``dtype`` attribute (round to nearest even when narrowing)."""
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("cast", **attrs)
+        assert "dtype" in attrs, "cast requires a dtype attribute"
+
+    @override
+    def forward_types(
+        self, inputs_types: Sequence[TensorType]
+    ) -> Sequence[XTCTensorType]:
+        assert len(inputs_types) == 1
+        t0 = cast(XTCTensorType, inputs_types[0])
+        assert t0.shape is not None
+        return [
+            XTCTensorType(
+                shape=t0.shape,
+                dtype=self.attrs.dtype,
+                device=self.device,
+                memory=self.memory,
+                distribution=self.distribution,
+            )
+        ]
+
+    @override
+    def forward(self, inputs: Sequence[Tensor]) -> Sequence[XTCTensor]:
+        expected_type = self.forward_types([inp.type for inp in inputs])[0]
+        out = inputs[0].numpy().astype(expected_type.constant_dtype)
+        res = XTCTensor(out)
+        res._type = XTCTensorType(
+            shape=out.shape,
+            dtype=expected_type.constant_dtype,
+            device=expected_type.device,
+            memory=expected_type.memory,
+            distribution=expected_type.distribution,
+        )
+        return [res]
+
+
 class XTCOperConv2D(XTCOperator):
     def __init__(self, **attrs: XTCOperatorAttr) -> None:
         super().__init__("conv2d", **attrs)

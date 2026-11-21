@@ -20,6 +20,10 @@ from .operators import (
     XTCOperAdd,
     XTCOperMul,
     XTCOperFma,
+    XTCOperExp,
+    XTCOperRsqrt,
+    XTCOperSilu,
+    XTCOperCast,
     XTCOperConv2D,
     XTCOperPad2D,
     XTCOperUnpad,
@@ -328,6 +332,26 @@ class XTCMulExpr(XTCOpExpr):
 class XTCFmaExpr(XTCOpExpr):
     def __init__(self, x: XTCExpr, y: XTCExpr, z: XTCExpr, **attrs: Any) -> None:
         super().__init__(XTCOperFma(**attrs), (x, y, z))
+
+
+class XTCExpExpr(XTCOpExpr):
+    def __init__(self, inp: XTCExpr, **attrs: Any) -> None:
+        super().__init__(XTCOperExp(**attrs), (inp,))
+
+
+class XTCRsqrtExpr(XTCOpExpr):
+    def __init__(self, inp: XTCExpr, **attrs: Any) -> None:
+        super().__init__(XTCOperRsqrt(**attrs), (inp,))
+
+
+class XTCSiluExpr(XTCOpExpr):
+    def __init__(self, inp: XTCExpr, **attrs: Any) -> None:
+        super().__init__(XTCOperSilu(**attrs), (inp,))
+
+
+class XTCCastExpr(XTCOpExpr):
+    def __init__(self, inp: XTCExpr, **attrs: Any) -> None:
+        super().__init__(XTCOperCast(**attrs), (inp,))
 
 
 class XTCConv2DExpr(XTCOpExpr):

@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 import tempfile
 import xtc.graphs.xtc.op as O
@@ -112,3 +113,39 @@ def test_fma_forward():
     x, y, z = (np.random.rand(4, 8).astype("float32") for _ in range(3))
     res = gb.graph.forward([XTCTensor(v) for v in (x, y, z)])
     assert np.allclose(res[0].numpy(), x * y + z)
+
+
+@pytest.mark.parametrize(
+    "opname,func",
+    [
+        ("exp", np.exp),
+        ("rsqrt", lambda x: 1.0 / np.sqrt(x)),
+        ("silu", lambda x: x / (1.0 + np.exp(-x))),
+    ],
+)
+def test_unary_forward_and_roundtrip(opname, func):
+    from xtc.graphs.xtc.data import XTCTensor
+
+    a = O.tensor((4, 8), "float32", name="A")
+    with O.graph(name=opname) as gb:
+        getattr(O, opname)(a, name="out")
+    x = np.random.rand(4, 8).astype("float32") + 0.5
+    res = gb.graph.forward([XTCTensor(x)])
+    assert np.allclose(res[0].numpy(), func(x), rtol=1e-5)
+
+    with O.graph(name=opname) as gb2:
+        gb2.from_dict(gb.graph.to_dict())
+    res2 = gb2.graph.forward([XTCTensor(x)])
+    assert np.array_equal(res[0].numpy(), res2[0].numpy())
+
+
+def test_cast_forward():
+    from xtc.graphs.xtc.data import XTCTensor
+
+    a = O.tensor((4, 8), "float32", name="A")
+    with O.graph(name="cast") as gb:
+        O.cast(a, name="out", dtype="float16")
+    x = np.random.rand(4, 8).astype("float32")
+    res = gb.graph.forward([XTCTensor(x)])
+    assert res[0].numpy().dtype == np.float16
+    assert np.array_equal(res[0].numpy(), x.astype(np.float16))
