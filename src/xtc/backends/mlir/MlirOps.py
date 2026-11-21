@@ -1109,6 +1109,185 @@ class MlirOperatorCast(MlirOperatorEltwiseUnary):
         return op(x, elt_out).result
 
 
+class MlirOperatorRowReduce(MlirOperator):
+    """(M, N) -> (M,) reduction of the rows, args = (M, N, dtype)."""
+
+    AXES = "ij"
+    KINDS = "PR"
+    ARITH_OP: Any = None
+    INIT: float = 0.0
+
+    @override
+    def dims(self, kind: str = "") -> tuple[str, ...]:
+        return self._dims(kind)
+
+    @override
+    def dims_sizes(self) -> dict[str, int]:
+        return {"i": self.args[0], "j": self.args[1]}
+
+    @override
+    def generate_op(
+        self, block: Block | None = None, args: Sequence[BlockArgument] = []
+    ) -> tuple[Block, OpAttrs]:
+        Ki, Kj, dtype = self.args
+        elt_type = {"float16": f16, "float32": f32, "float64": f64}[dtype]
+        elt_bits = {"float16": 16, "float32": 32, "float64": 64}[dtype]
+        if block is None:
+            block = Block(
+                arg_types=[
+                    self.op_type(elt_type, [Ki, Kj]),
+                    self.op_type(elt_type, [Ki]),
+                ]
+            )
+            args = block.args
+        assert len(args) == 2
+        with ImplicitBuilder(block):
+            init = arith.ConstantOp(builtin.FloatAttr(self.INIT, elt_bits))
+            result = (args[1].type,) if self.op_type == TensorType else ()
+            fill = linalg.FillOp(
+                res=result,
+                inputs=(init.results[0],),
+                outputs=(args[1],),
+            )
+            block_in = Block(arg_types=[elt_type, elt_type])
+            with ImplicitBuilder(block_in):
+                linalg.YieldOp(self.ARITH_OP(block_in.args[0], block_in.args[1]))
+            reduce = linalg.GenericOp(
+                inputs=(args[0],),
+                outputs=(fill.results[0],) if self.op_type == TensorType else (args[1],),
+                body=Region([block_in]),  # type: ignore # mypy issue with dataclass
+                indexing_maps=[
+                    AffineMapAttr(AffineMap.from_callable(lambda i, j: (i, j))),  # type: ignore
+                    AffineMapAttr(AffineMap.from_callable(lambda i, j: (i,))),  # type: ignore
+                ],
+                iterator_types=[StringAttr("parallel"), StringAttr("reduction")],
+                result_types=result,
+            )
+        fill_node_id = f"{self.name}_0"
+        reduce_node_id = f"{self.name}"
+        fill.attributes[f"__xtc_id_{fill_node_id}_"] = UnitAttr()
+        reduce.attributes[f"__xtc_id_{reduce_node_id}_"] = UnitAttr()
+        attrs = {
+            "nodes_map": {fill_node_id: fill, reduce_node_id: reduce},
+            "dims_sizes": [{"i": Ki}, self.dims_sizes()],
+            "reduction_dims": [[], list(self.dims("R"))],
+            "output_nodes": [reduce],
+        }
+        return block, attrs
+
+    @override
+    def inputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        return ((self.args[0], self.args[1]),)
+
+    @override
+    def inputs_types(self) -> tuple[str, ...]:
+        return (self.args[2],)
+
+    @override
+    def outputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        return ((self.args[0],),)
+
+    @override
+    def outputs_types(self) -> tuple[str, ...]:
+        return (self.args[2],)
+
+
+class MlirOperatorReduceMax(MlirOperatorRowReduce):
+    DEFAULT_NAME = "reduce_max"
+    ARITH_OP = arith.MaximumfOp
+    INIT = float("-inf")
+
+
+class MlirOperatorReduceSum(MlirOperatorRowReduce):
+    DEFAULT_NAME = "reduce_sum"
+    ARITH_OP = arith.AddfOp
+    INIT = 0.0
+
+
+class MlirOperatorRowBinary(MlirOperator):
+    """(M, N) op (M,) -> (M, N), args = (M, N, dtype)."""
+
+    AXES = "ij"
+    KINDS = "PP"
+    ARITH_OP: Any = None
+
+    @override
+    def dims(self, kind: str = "") -> tuple[str, ...]:
+        return self._dims(kind)
+
+    @override
+    def dims_sizes(self) -> dict[str, int]:
+        return {"i": self.args[0], "j": self.args[1]}
+
+    @override
+    def generate_op(
+        self, block: Block | None = None, args: Sequence[BlockArgument] = []
+    ) -> tuple[Block, OpAttrs]:
+        Ki, Kj, dtype = self.args
+        elt_type = {"float16": f16, "float32": f32, "float64": f64}[dtype]
+        if block is None:
+            block = Block(
+                arg_types=[
+                    self.op_type(elt_type, [Ki, Kj]),
+                    self.op_type(elt_type, [Ki]),
+                    self.op_type(elt_type, [Ki, Kj]),
+                ]
+            )
+            args = block.args
+        assert len(args) == 3
+        with ImplicitBuilder(block):
+            result = (args[2].type,) if self.op_type == TensorType else ()
+            block_in = Block(arg_types=[elt_type, elt_type, elt_type])
+            with ImplicitBuilder(block_in):
+                linalg.YieldOp(self.ARITH_OP(block_in.args[0], block_in.args[1]))
+            node = linalg.GenericOp(
+                inputs=(args[0], args[1]),
+                outputs=(args[2],),
+                body=Region([block_in]),  # type: ignore # mypy issue with dataclass
+                indexing_maps=[
+                    AffineMapAttr(AffineMap.from_callable(lambda i, j: (i, j))),  # type: ignore
+                    AffineMapAttr(AffineMap.from_callable(lambda i, j: (i,))),  # type: ignore
+                    AffineMapAttr(AffineMap.from_callable(lambda i, j: (i, j))),  # type: ignore
+                ],
+                iterator_types=[StringAttr("parallel")] * 2,
+                result_types=result,
+            )
+        node_id = f"{self.name}"
+        node.attributes[f"__xtc_id_{node_id}_"] = UnitAttr()
+        attrs = {
+            "nodes_map": {node_id: node},
+            "dims_sizes": [self.dims_sizes()],
+            "output_nodes": [node],
+        }
+        return block, attrs
+
+    @override
+    def inputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        return (self.args[0], self.args[1]), (self.args[0],)
+
+    @override
+    def inputs_types(self) -> tuple[str, ...]:
+        return (self.args[2], self.args[2])
+
+    @override
+    def outputs_dims(self) -> tuple[tuple[int, ...], ...]:
+        return ((self.args[0], self.args[1]),)
+
+    @override
+    def outputs_types(self) -> tuple[str, ...]:
+        return (self.args[2],)
+
+
+class MlirOperatorSubRow(MlirOperatorRowBinary):
+    DEFAULT_NAME = "sub_row"
+    ARITH_OP = arith.SubfOp
+
+
+class MlirOperatorDivRow(MlirOperatorRowBinary):
+    DEFAULT_NAME = "div_row"
+    ARITH_OP = arith.DivfOp
+
+
 class MlirOperatorPad2D(MlirOperatorPad):
     DEFAULT_NAME = "pad2d"
     AXES = "bhwc"
@@ -1443,6 +1622,10 @@ class MlirOperators:
     rsqrt = MlirOperatorRsqrt
     silu = MlirOperatorSilu
     cast = MlirOperatorCast
+    reduce_max = MlirOperatorReduceMax
+    reduce_sum = MlirOperatorReduceSum
+    sub_row = MlirOperatorSubRow
+    div_row = MlirOperatorDivRow
     pad2d = MlirOperatorPad2D
     unpad = MlirOperatorUnpad
     pad = MlirOperatorPad

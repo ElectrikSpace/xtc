@@ -149,3 +149,30 @@ def test_cast_forward():
     res = gb.graph.forward([XTCTensor(x)])
     assert res[0].numpy().dtype == np.float16
     assert np.array_equal(res[0].numpy(), x.astype(np.float16))
+
+
+@pytest.mark.parametrize("opname,func", [("reduce_max", np.max), ("reduce_sum", np.sum)])
+def test_row_reduce_forward(opname, func):
+    from xtc.graphs.xtc.data import XTCTensor
+
+    a = O.tensor((4, 8), "float32", name="A")
+    with O.graph(name=opname) as gb:
+        getattr(O, opname)(a, name="out")
+    x = np.random.rand(4, 8).astype("float32")
+    res = gb.graph.forward([XTCTensor(x)])
+    assert res[0].numpy().shape == (4,)
+    assert np.allclose(res[0].numpy(), func(x, axis=-1))
+
+
+@pytest.mark.parametrize("opname,func", [("sub_row", np.subtract), ("div_row", np.divide)])
+def test_row_binary_forward(opname, func):
+    from xtc.graphs.xtc.data import XTCTensor
+
+    a = O.tensor((4, 8), "float32", name="A")
+    b = O.tensor((4,), "float32", name="B")
+    with O.graph(name=opname) as gb:
+        getattr(O, opname)(a, b, name="out")
+    x = np.random.rand(4, 8).astype("float32")
+    y = np.random.rand(4).astype("float32") + 0.5
+    res = gb.graph.forward([XTCTensor(x), XTCTensor(y)])
+    assert np.allclose(res[0].numpy(), func(x, y[:, None]))

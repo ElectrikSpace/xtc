@@ -596,6 +596,152 @@ class XTCOperCast(XTCOperEltwiseUnary):
         return [res]
 
 
+class XTCOperRowReduce(XTCOperator):
+    """Reduction of the last axis of a 2D tensor (M, N) to a vector (M,)."""
+
+    NP_FUNC: Any = None
+
+    @override
+    def get_operation(
+        self,
+        inps_types: Sequence[XTCTensorType],
+        outs_types: Sequence[XTCTensorType],
+    ) -> XTCOperation:
+        m, n = inps_types[0].constant_shape
+        return self._get_operation(
+            inps_types,
+            outs_types,
+            dims={"i": m, "j": n},
+            kinds=("P", "R"),
+            inps_maps=(("i", "j"),),
+            outs_maps=(("i",),),
+        )
+
+    @override
+    def forward_types(
+        self, inputs_types: Sequence[TensorType]
+    ) -> Sequence[XTCTensorType]:
+        assert len(inputs_types) == 1
+        t0 = cast(XTCTensorType, inputs_types[0])
+        assert t0.shape is not None and len(t0.constant_shape) == 2, (
+            f"{self.name} expects a 2D input"
+        )
+        return [
+            XTCTensorType(
+                shape=(t0.constant_shape[0],),
+                dtype=t0.dtype,
+                device=self.device,
+                memory=self.memory,
+                distribution=self.distribution,
+            )
+        ]
+
+    @override
+    def forward(self, inputs: Sequence[Tensor]) -> Sequence[XTCTensor]:
+        expected_type = self.forward_types([inp.type for inp in inputs])[0]
+        out = type(self).NP_FUNC(inputs[0].numpy(), axis=-1)
+        res = XTCTensor(out.astype(expected_type.constant_dtype))
+        res._type = XTCTensorType(
+            shape=out.shape,
+            dtype=expected_type.constant_dtype,
+            device=expected_type.device,
+            memory=expected_type.memory,
+            distribution=expected_type.distribution,
+        )
+        return [res]
+
+
+class XTCOperReduceMax(XTCOperRowReduce):
+    NP_FUNC = staticmethod(np.max)
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("reduce_max", **attrs)
+
+
+class XTCOperReduceSum(XTCOperRowReduce):
+    NP_FUNC = staticmethod(np.sum)
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("reduce_sum", **attrs)
+
+
+class XTCOperRowBinary(XTCOperator):
+    """Elementwise binary of a 2D tensor (M, N) with a vector (M,) broadcast along the rows."""
+
+    NP_FUNC: Any = None
+
+    @override
+    def get_operation(
+        self,
+        inps_types: Sequence[XTCTensorType],
+        outs_types: Sequence[XTCTensorType],
+    ) -> XTCOperation:
+        m, n = inps_types[0].constant_shape
+        return self._get_operation(
+            inps_types,
+            outs_types,
+            dims={"i": m, "j": n},
+            kinds=("P", "P"),
+            inps_maps=(("i", "j"), ("i",)),
+            outs_maps=(("i", "j"),),
+        )
+
+    @override
+    def forward_types(
+        self, inputs_types: Sequence[TensorType]
+    ) -> Sequence[XTCTensorType]:
+        assert len(inputs_types) == 2
+        t0 = cast(XTCTensorType, inputs_types[0])
+        t1 = cast(XTCTensorType, inputs_types[1])
+        assert t0.shape is not None and t1.shape is not None
+        assert len(t0.constant_shape) == 2 and t1.constant_shape == (
+            t0.constant_shape[0],
+        ), (
+            f"incompatible shapes for {self.name}: "
+            f"{t0.constant_shape} {t1.constant_shape}"
+        )
+        assert t0.dtype == t1.dtype, (
+            f"incompatible dtypes for {self.name}: {t0.dtype} {t1.dtype}"
+        )
+        return [
+            XTCTensorType(
+                shape=t0.shape,
+                dtype=t0.dtype,
+                device=self.device,
+                memory=self.memory,
+                distribution=self.distribution,
+            )
+        ]
+
+    @override
+    def forward(self, inputs: Sequence[Tensor]) -> Sequence[XTCTensor]:
+        expected_type = self.forward_types([inp.type for inp in inputs])[0]
+        out = type(self).NP_FUNC(inputs[0].numpy(), inputs[1].numpy()[:, None])
+        res = XTCTensor(out.astype(expected_type.constant_dtype))
+        res._type = XTCTensorType(
+            shape=out.shape,
+            dtype=expected_type.constant_dtype,
+            device=expected_type.device,
+            memory=expected_type.memory,
+            distribution=expected_type.distribution,
+        )
+        return [res]
+
+
+class XTCOperSubRow(XTCOperRowBinary):
+    NP_FUNC = staticmethod(np.subtract)
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("sub_row", **attrs)
+
+
+class XTCOperDivRow(XTCOperRowBinary):
+    NP_FUNC = staticmethod(np.divide)
+
+    def __init__(self, **attrs: XTCOperatorAttr) -> None:
+        super().__init__("div_row", **attrs)
+
+
 class XTCOperConv2D(XTCOperator):
     def __init__(self, **attrs: XTCOperatorAttr) -> None:
         super().__init__("conv2d", **attrs)

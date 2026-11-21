@@ -19,6 +19,10 @@ from .expr import (
     XTCRsqrtExpr,
     XTCSiluExpr,
     XTCCastExpr,
+    XTCReduceMaxExpr,
+    XTCReduceSumExpr,
+    XTCSubRowExpr,
+    XTCDivRowExpr,
     XTCConv2DExpr,
     XTCPad2DExpr,
     XTCUnpadExpr,
@@ -42,6 +46,10 @@ __all__ = [
     "rsqrt",
     "silu",
     "cast",
+    "reduce_max",
+    "reduce_sum",
+    "sub_row",
+    "div_row",
     "reshape",
     "transpose",
     "tensor",
@@ -142,6 +150,30 @@ def silu(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
 def cast(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
     """Elementwise conversion to the dtype attribute."""
     return XTCGraphContext.append(XTCCastExpr(inp, **attrs), name=name)
+
+
+def reduce_max(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
+    """Max of each row of a 2D tensor: (M, N) -> (M,)."""
+    return XTCGraphContext.append(XTCReduceMaxExpr(inp, **attrs), name=name)
+
+
+def reduce_sum(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:
+    """Sum of each row of a 2D tensor: (M, N) -> (M,)."""
+    return XTCGraphContext.append(XTCReduceSumExpr(inp, **attrs), name=name)
+
+
+def sub_row(
+    a: XTCExpr, b: XTCExpr, name: str | None = None, **attrs: Any
+) -> XTCExpr:
+    """a[i, j] - b[i] for a (M, N) and b (M,)."""
+    return XTCGraphContext.append(XTCSubRowExpr(a, b, **attrs), name=name)
+
+
+def div_row(
+    a: XTCExpr, b: XTCExpr, name: str | None = None, **attrs: Any
+) -> XTCExpr:
+    """a[i, j] / b[i] for a (M, N) and b (M,)."""
+    return XTCGraphContext.append(XTCDivRowExpr(a, b, **attrs), name=name)
 
 
 def reshape(inp: XTCExpr, name: str | None = None, **attrs: Any) -> XTCExpr:

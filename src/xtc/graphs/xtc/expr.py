@@ -24,6 +24,10 @@ from .operators import (
     XTCOperRsqrt,
     XTCOperSilu,
     XTCOperCast,
+    XTCOperReduceMax,
+    XTCOperReduceSum,
+    XTCOperSubRow,
+    XTCOperDivRow,
     XTCOperConv2D,
     XTCOperPad2D,
     XTCOperUnpad,
@@ -352,6 +356,26 @@ class XTCSiluExpr(XTCOpExpr):
 class XTCCastExpr(XTCOpExpr):
     def __init__(self, inp: XTCExpr, **attrs: Any) -> None:
         super().__init__(XTCOperCast(**attrs), (inp,))
+
+
+class XTCReduceMaxExpr(XTCOpExpr):
+    def __init__(self, inp: XTCExpr, **attrs: Any) -> None:
+        super().__init__(XTCOperReduceMax(**attrs), (inp,))
+
+
+class XTCReduceSumExpr(XTCOpExpr):
+    def __init__(self, inp: XTCExpr, **attrs: Any) -> None:
+        super().__init__(XTCOperReduceSum(**attrs), (inp,))
+
+
+class XTCSubRowExpr(XTCOpExpr):
+    def __init__(self, x: XTCExpr, y: XTCExpr, **attrs: Any) -> None:
+        super().__init__(XTCOperSubRow(**attrs), (x, y))
+
+
+class XTCDivRowExpr(XTCOpExpr):
+    def __init__(self, x: XTCExpr, y: XTCExpr, **attrs: Any) -> None:
+        super().__init__(XTCOperDivRow(**attrs), (x, y))
 
 
 class XTCConv2DExpr(XTCOpExpr):
