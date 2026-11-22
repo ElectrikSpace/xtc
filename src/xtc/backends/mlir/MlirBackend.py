@@ -12,10 +12,15 @@ from xdsl.dialects.builtin import (
     Float16Type,
     Float32Type,
     Float64Type,
+    IntegerType,
     bf16,
     f16,
     f32,
     f64,
+    i8,
+    i16,
+    i32,
+    i64,
 )
 
 import xtc.itf as itf
@@ -24,23 +29,37 @@ from .MlirCompiler import MlirCompiler
 from .MlirScheduler import MlirScheduler
 
 
-ELT_TYPES: dict[str, BFloat16Type | Float16Type | Float32Type | Float64Type] = {
+ELT_TYPES: dict[
+    str, BFloat16Type | Float16Type | Float32Type | Float64Type | IntegerType
+] = {
     "bfloat16": bf16,
     "float16": f16,
     "float32": f32,
     "float64": f64,
+    "int8": i8,
+    "int16": i16,
+    "int32": i32,
+    "int64": i64,
 }
 ELT_SIZES: dict[str, int] = {
     "bfloat16": 16,
     "float16": 16,
     "float32": 32,
     "float64": 64,
+    "int8": 8,
+    "int16": 16,
+    "int32": 32,
+    "int64": 64,
 }
 TYPES_MAP: dict[str, str] = {
     "bf16": "bfloat16",
     "f16": "float16",
     "f32": "float32",
     "f64": "float64",
+    "i8": "int8",
+    "i16": "int16",
+    "i32": "int32",
+    "i64": "int64",
 }
 
 

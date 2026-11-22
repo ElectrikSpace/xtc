@@ -14,6 +14,7 @@ from xdsl.dialects.builtin import (
     MemRefType,
     TensorType,
     IndexType,
+    IntegerType,
     UnitAttr,
     StringAttr,
     AffineMapAttr,
@@ -35,6 +36,42 @@ __all__ = [
 
 OpAttrs: TypeAlias = dict[str, Any]
 
+INT_DTYPES: tuple[str, ...] = ("int8", "int16", "int32", "int64")
+
+
+def _is_int_dtype(dtype: str) -> bool:
+    return dtype in INT_DTYPES
+
+
+def _is_int_elt_type(elt_type: Any) -> bool:
+    return isinstance(elt_type, IntegerType)
+
+
+def _value_constant(value: Any, elt_type: Any) -> arith.ConstantOp:
+    """Constant of the given element type, supporting both float and
+    integer (signed) element types."""
+    if _is_int_elt_type(elt_type):
+        return arith.ConstantOp(builtin.IntegerAttr(int(value), elt_type))
+    return arith.ConstantOp(builtin.FloatAttr(value, elt_type))
+
+
+def _zero_constant(elt_type: Any) -> arith.ConstantOp:
+    return _value_constant(0, elt_type)
+
+
+def _mul(a: Any, b: Any, flags: Any = None) -> Any:
+    """a * b in the type of the operands, integer or float."""
+    if _is_int_elt_type(a.type):
+        return arith.MuliOp(a, b)
+    return arith.MulfOp(a, b) if flags is None else arith.MulfOp(a, b, flags=flags)
+
+
+def _add(a: Any, b: Any, flags: Any = None) -> Any:
+    """a + b in the type of the operands, integer or float."""
+    if _is_int_elt_type(a.type):
+        return arith.AddiOp(a, b)
+    return arith.AddfOp(a, b) if flags is None else arith.AddfOp(a, b, flags=flags)
+
 
 def _is_natural_layout(layout: list[int] | None, ndim: int) -> bool:
     return layout is None or layout == list(range(ndim))
@@ -53,11 +90,13 @@ def _require_natural_layouts(xtc_op: Operation) -> None:
 def _cast_type_to(
     op: Any, cur_dtype: str, cast_dtype: str | None, ret_ssa: bool = True
 ) -> Any:
-    """Cast a scalar or tensor value from one float dtype to another."""
+    """Cast a scalar or tensor value between float or integer dtypes."""
     if cast_dtype is None or cur_dtype == cast_dtype:
         return op
     assert cur_dtype in ELT_SIZES
     assert cast_dtype in ELT_SIZES
+    cur_int = _is_int_dtype(cur_dtype)
+    cast_int = _is_int_dtype(cast_dtype)
     cur_size = ELT_SIZES[cur_dtype]
     cast_size = ELT_SIZES[cast_dtype]
     if isinstance(op.type, TensorType):
@@ -68,8 +107,25 @@ def _cast_type_to(
             "and cast back to the out dtype with a linalg.generic"
         )
         target = ELT_TYPES[cast_dtype]
+    func: Any
+    if cur_int != cast_int:
+        # integer <-> float conversions
+        if cur_int:
+            func = arith.SIToFPOp(op, target)
+        else:
+            func = arith.FPToSIOp(op, target)
+        return func.results[0] if ret_ssa else func
+    if cur_int:
+        # integer <-> integer conversions are always signed
+        if cur_size < cast_size:
+            func = arith.ExtSIOp(op, target)
+        elif cur_size > cast_size:
+            func = arith.TruncIOp(op, target)
+        else:
+            return op
+        return func.results[0] if ret_ssa else func
     if cur_size < cast_size:
-        func: Any = arith.ExtFOp(op, target)
+        func = arith.ExtFOp(op, target)
     elif cur_size > cast_size:
         func = arith.TruncFOp(op, target)
     else:
@@ -317,7 +373,7 @@ class MlirOperatorMatmul(MlirOperator):
         with ImplicitBuilder(block):
             result: tuple[Any, ...] = (args[2].type,) if using_tensors else ()
             fill_output: Any = args[2]
-            cst0 = arith.ConstantOp(builtin.FloatAttr(0, acc_elt))
+            cst0 = _zero_constant(acc_elt)
             acc_result: tuple[Any, ...]
             if convert_output and using_tensors:
                 fill_output = tensor.EmptyOp(
@@ -347,8 +403,8 @@ class MlirOperatorMatmul(MlirOperator):
                 with ImplicitBuilder(block_in):
                     a = _cast_type_to(block_in.args[0], self.in_dtypes[0], acc)
                     b = _cast_type_to(block_in.args[1], self.in_dtypes[1], acc)
-                    mul = arith.MulfOp(a, b)
-                    add = arith.AddfOp(block_in.args[2], mul)
+                    mul = _mul(a, b)
+                    add = _add(block_in.args[2], mul)
                     linalg.YieldOp(add)
                 reduce = linalg.GenericOp(
                     inputs=(args[0], args[1]),
@@ -486,7 +542,7 @@ class MlirOperatorConv2D(MlirOperator):
         with ImplicitBuilder(block):
             result: tuple[Any, ...] = (args[2].type,) if using_tensors else ()
             fill_output: Any = args[2]
-            cst0 = arith.ConstantOp(builtin.FloatAttr(0, acc_elt))
+            cst0 = _zero_constant(acc_elt)
             acc_result: tuple[Any, ...]
             if convert_output and using_tensors:
                 fill_output = tensor.EmptyOp(
@@ -524,8 +580,8 @@ class MlirOperatorConv2D(MlirOperator):
             with ImplicitBuilder(block_in):
                 a = _cast_type_to(block_in.args[0], self.in_dtypes[0], acc)
                 b = _cast_type_to(block_in.args[1], self.in_dtypes[1], acc)
-                mul = arith.MulfOp(a, b, flags=flags)
-                add = arith.AddfOp(block_in.args[2], mul, flags=flags)
+                mul = _mul(a, b, flags=flags)
+                add = _add(block_in.args[2], mul, flags=flags)
                 linalg.YieldOp(add)
             reduce = linalg.GenericOp(
                 inputs=(args[0], args[1]),
