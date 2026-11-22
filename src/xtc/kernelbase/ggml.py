@@ -4,6 +4,8 @@
 #
 from __future__ import annotations
 
+from typing import Any
+
 import xtc.graphs.xtc.op as O
 from xtc.graphs.xtc.graph import XTCGraph
 from xtc.quant.ggml import ggml_quant_format
@@ -15,7 +17,12 @@ __all__ = [
 
 
 def ggml_matmul_graph(
-    m: int, n: int, k: int, dtype: str = "float32", name: str = "matmul"
+    m: int,
+    n: int,
+    k: int,
+    dtype: str = "float32",
+    name: str = "matmul",
+    device: Any = None,
 ) -> XTCGraph:
     """XTC graph of a ggml ``MUL_MAT`` node (2D slice).
 
@@ -28,12 +35,14 @@ def ggml_matmul_graph(
     - ``C`` = dst, shape (m, n).
 
     The compiled kernel takes bare pointers ``(A=src1, B=src0, C=dst)``.
+    ``device`` places the tensors on an accelerator (e.g. the MPPA device).
     """
-    a = O.tensor((m, k), dtype, name="A")
-    b = O.tensor((k, n), dtype, name="B", layout=[1, 0])
+    a = O.tensor((m, k), dtype, name="A", device=device)
+    b = O.tensor((k, n), dtype, name="B", layout=[1, 0], device=device)
     with O.graph(name=name) as gb:
-        O.matmul(a, b, name="C")
+        O.matmul(a, b, name="C", device=device)
     return gb.graph
+
 
 
 def ggml_matmul_q_graph(

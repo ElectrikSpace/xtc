@@ -83,12 +83,13 @@ def build_stub(
     key: str,
     sched: DescriptSchedule,
     overwrite: bool = False,
+    target: str | None = None,
 ) -> bool:
     """Compile/validate/insert the pending kernel ``key`` with ``sched``. Keeps the stub on failure."""
     d = pending_root(kb) / key
     try:
         graph = graph_builder.graph_from_file(d / "graph.yaml")
-        got = graph_key(graph)
+        got = graph_key(graph, target=target)
         if got != key:
             print(
                 f"{key}: graph.yaml hashes to {got}, not {key}. The graph must not be "
@@ -96,7 +97,8 @@ def build_stub(
                 file=sys.stderr,
             )
             return False
-        entry = kb.add(graph, sched, overwrite=overwrite)
+        entry = kb.add(graph, sched, overwrite=overwrite, target=target)
+
     except Exception as e:  # compile / schedule errors: keep the stub for the user
         traceback.print_exc()
         print(f"{key}: build failed: {e}", file=sys.stderr)
@@ -127,6 +129,7 @@ def run_stub(
     sample: dict[str, int] | None = None,
     default_node: str | None = None,
     argv: list[str] | None = None,
+    target: str | None = None,
 ) -> int:
     """Entry point of a stub's ``build_kernel.py``; returns a process exit code."""
     script = Path(script_file).resolve()
@@ -158,4 +161,4 @@ def run_stub(
         sample=dict(sample or {}),
         default_node=default_node,
     )
-    return 0 if build_stub(kb, key, sched, overwrite=ns.overwrite) else 1
+    return 0 if build_stub(kb, key, sched, overwrite=ns.overwrite, target=target) else 1

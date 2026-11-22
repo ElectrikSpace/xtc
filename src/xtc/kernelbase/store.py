@@ -101,10 +101,13 @@ class KernelBase:
         backend_kwargs: dict[str, Any] | None = None,
         overwrite: bool = False,
         bare_ptr: bool = True,
+        target: str | None = None,
     ) -> KernelEntry:
+        if target not in (None, "mppa"):
+            raise ValueError(f"unknown kernel target {target!r}")
         backend_kwargs = dict(backend_kwargs or {})
-        key = graph_key(graph)
-        full_hash = graph_hash(graph)
+        key = graph_key(graph, target=target)
+        full_hash = graph_hash(graph, target=target)
         entry = KernelEntry(self.root, key)
         if entry.path.exists() and not overwrite:
             raise FileExistsError(
@@ -124,31 +127,40 @@ class KernelBase:
         if schedule.default_node is not None:
             sched_kw["default_node"] = schedule.default_node
         sch_impl = impl.get_scheduler(**sched_kw)
+        if target == "mppa":
+            from xtc.runtimes.accelerator.mppa import MppaDevice
+
+            nb_pe = MppaDevice().nb_pe
+            sch_impl.define_memory_mesh(axes={"mx": 1})
+            sch_impl.define_processor_mesh(axes={"px": 1, "psx": nb_pe})
         schedule.apply(sch_impl)
         mlir_sched = sch_impl.schedule()
 
-        with tempfile.TemporaryDirectory(prefix="xtc_kb_build_") as tmpd:
-            tmp_dump = Path(tmpd) / "kernel"
-            comp = impl.get_compiler(
-                shared_lib=True,
-                dump_file=str(tmp_dump),
-                bare_ptr=bare_ptr,
-                save_temps=True,
-                save_temps_dir=tmpd,
-            )
-            module = comp.compile(schedule=mlir_sched)
+        if target == "mppa":
+            module = self._build_mppa(impl, mlir_sched, bare_ptr, entry)
+        else:
+            with tempfile.TemporaryDirectory(prefix="xtc_kb_build_") as tmpd:
+                tmp_dump = Path(tmpd) / "kernel"
+                comp = impl.get_compiler(
+                    shared_lib=True,
+                    dump_file=str(tmp_dump),
+                    bare_ptr=bare_ptr,
+                    save_temps=True,
+                    save_temps_dir=tmpd,
+                )
+                module = comp.compile(schedule=mlir_sched)
 
-            src_so = Path(module.file_name)
-            if not src_so.is_file():
-                raise FileNotFoundError(f"compiled shared library missing: {src_so}")
-            shutil.copy2(src_so, entry.kernel_so)
+                src_so = Path(module.file_name)
+                if not src_so.is_file():
+                    raise FileNotFoundError(f"compiled shared library missing: {src_so}")
+                shutil.copy2(src_so, entry.kernel_so)
 
-            src_obj = Path(tmpd) / "kernel.o"
-            if not src_obj.is_file():
-                raise FileNotFoundError(f"compiled object missing: {src_obj}")
-            shutil.copy2(src_obj, entry.kernel_obj)
+                src_obj = Path(tmpd) / "kernel.o"
+                if not src_obj.is_file():
+                    raise FileNotFoundError(f"compiled object missing: {src_obj}")
+                shutil.copy2(src_obj, entry.kernel_obj)
 
-        canonical = canonical_graph_dict(graph)
+        canonical = canonical_graph_dict(graph, target)
         try:
             from importlib.metadata import version as pkg_version
 
@@ -161,7 +173,7 @@ class KernelBase:
             "sha256": full_hash,
             "canonical_graph": canonical,
             "payload_name": module.payload_name,
-            "object": "kernel.o",
+            "object": "kernel.o" if target is None else None,
             "graph_name": graph.name,
             "backend": backend,
             "backend_kwargs": backend_kwargs,
@@ -171,17 +183,35 @@ class KernelBase:
             "target_machine": platform.machine(),
             "created_utc": datetime.now(timezone.utc).isoformat(),
         }
+        if target is not None:
+            meta["target"] = target
         with open(entry.meta_yaml, "w", encoding="utf-8") as f:
             yaml.safe_dump(meta, f, sort_keys=False)
 
         with open(entry.test_py, "w", encoding="utf-8") as f:
-            f.write(render_test_kernel_py(entry.path))
+            f.write(render_test_kernel_py(entry.path, target))
 
         return entry
 
-    def lookup(self, graph: XTCGraph) -> KernelEntry | None:
-        key = graph_key(graph)
-        full_hash = graph_hash(graph)
+    def _build_mppa(self, impl: Any, sched: Any, bare_ptr: bool, entry: KernelEntry) -> Any:
+        from xtc.runtimes.accelerator.mppa import MppaDevice
+
+        # the host runner stores the path of the device kernel: build it in the entry directory
+        comp = impl.get_compiler(
+            target=MppaDevice(),
+            shared_lib=True,
+            dump_file=str(entry.path / "kernel"),
+            bare_ptr=bare_ptr,
+        )
+        module = comp.compile(schedule=sched)
+        if module.get_executor(validate=True).execute() != 0:
+            shutil.rmtree(entry.path)
+            raise RuntimeError("MPPA kernel does not validate against the reference")
+        return module
+
+    def lookup(self, graph: XTCGraph, target: str | None = None) -> KernelEntry | None:
+        key = graph_key(graph, target=target)
+        full_hash = graph_hash(graph, target=target)
         cand = KernelEntry(self.root, key)
         if not cand.path.is_dir():
             return None

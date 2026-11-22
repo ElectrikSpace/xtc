@@ -783,7 +783,11 @@ class MppaDevice(AcceleratorDevice):
 
     @override
     def memory_copy_to(
-        self, acc_handle: Any, src: ctypes.c_void_p, size_bytes: int
+        self,
+        acc_handle: Any,
+        src: ctypes.c_void_p,
+        size_bytes: int,
+        offset_bytes: int = 0,
     ) -> None:
         if isinstance(acc_handle, MppaSmemHandle):
             self._smem_transfer(acc_handle, src, to_smem=True)
@@ -792,15 +796,24 @@ class MppaDevice(AcceleratorDevice):
             self.init_device()
         assert self.lib_loader is not None
         # Copy memory to accelerator device
-        copy_to_memory_fn = getattr(self.lib_loader.lib, "mppa_memory_copy_to")
-        copy_to_memory_fn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+        copy_to_memory_fn = getattr(self.lib_loader.lib, "mppa_memory_copy_to_offset")
+        copy_to_memory_fn.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+        ]
         copy_to_memory_fn.restype = ctypes.c_bool
-        if not copy_to_memory_fn(acc_handle, src, size_bytes):
+        if not copy_to_memory_fn(acc_handle, src, offset_bytes, size_bytes):
             raise Exception("Failed to copy memory to accelerator device")
 
     @override
     def memory_copy_from(
-        self, acc_handle: Any, dst: ctypes.c_void_p, size_bytes: int
+        self,
+        acc_handle: Any,
+        dst: ctypes.c_void_p,
+        size_bytes: int,
+        offset_bytes: int = 0,
     ) -> None:
         if isinstance(acc_handle, MppaSmemHandle):
             self._smem_transfer(acc_handle, dst, to_smem=False)
@@ -809,14 +822,17 @@ class MppaDevice(AcceleratorDevice):
             self.init_device()
         assert self.lib_loader is not None
         # Copy memory from accelerator device to host
-        copy_from_memory_fn = getattr(self.lib_loader.lib, "mppa_memory_copy_from")
+        copy_from_memory_fn = getattr(
+            self.lib_loader.lib, "mppa_memory_copy_from_offset"
+        )
         copy_from_memory_fn.argtypes = [
             ctypes.c_void_p,
             ctypes.c_void_p,
             ctypes.c_size_t,
+            ctypes.c_size_t,
         ]
         copy_from_memory_fn.restype = ctypes.c_bool
-        if not copy_from_memory_fn(acc_handle, dst, size_bytes):
+        if not copy_from_memory_fn(acc_handle, dst, offset_bytes, size_bytes):
             raise Exception("Failed to copy memory from accelerator device to host")
 
     @override

@@ -127,6 +127,30 @@ bool mppa_memory_copy_from(void *handle, void *dst, size_t size)
     return true;
 }
 
+bool mppa_memory_copy_to_offset(void *handle, void *src, size_t offset, size_t size)
+{
+    assert(handle != NULL);
+    assert(mppa_accelerator != NULL);
+    mppa_buffer_t *buffer = (mppa_buffer_t *)handle;
+    if (mppa_offload_write(mppa_accelerator, src, buffer->offset + offset, size, NULL) != 0) {
+        assert(0 && "Failed write buffer\n");
+        return false;
+    }
+    return true;
+}
+
+bool mppa_memory_copy_from_offset(void *handle, void *dst, size_t offset, size_t size)
+{
+    assert(handle != NULL);
+    assert(mppa_accelerator != NULL);
+    mppa_buffer_t *buffer = (mppa_buffer_t *)handle;
+    if (mppa_offload_read(mppa_accelerator, dst, buffer->offset + offset, size, NULL) != 0) {
+        assert(0 && "Failed read buffer\n");
+        return false;
+    }
+    return true;
+}
+
 bool mppa_memory_fill_zero(void *handle, size_t size)
 {
     void* tmp = calloc(size, 1);
