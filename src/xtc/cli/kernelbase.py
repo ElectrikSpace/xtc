@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ import yaml
 
 from xtc.graphs.xtc.builder import graph_builder
 from xtc.kernelbase import DescriptSchedule, KernelBase, graph_hash, graph_key, pending
+from xtc.kernelbase.static import build_bundle, ensure_static
 
 
 def cmd_add(args: argparse.Namespace) -> int:
@@ -161,6 +163,56 @@ def _add_root_arg(ap: argparse.ArgumentParser) -> None:
     )
 
 
+def _support_dirs(args: argparse.Namespace) -> tuple[Path, Path]:
+    ggml = args.ggml_include or os.environ.get("GGML_INCLUDE_DIR")
+    support = args.support_include or os.environ.get("XTC_SUPPORT_LIB_INCLUDE")
+    if not ggml or not support:
+        raise SystemExit("need --ggml-include and --support-include (or GGML_INCLUDE_DIR and XTC_SUPPORT_LIB_INCLUDE)")
+    return Path(ggml), Path(support)
+
+
+def cmd_static(args: argparse.Namespace) -> int:
+    """Build libxtc_k_<key>.a for entries (rebuilding the kernel object when missing)."""
+    kb = KernelBase(args.root)
+    ggml, support = _support_dirs(args)
+    keys = args.keys or kb.keys()
+    failed = 0
+    for k in keys:
+        entry = kb.get(k)
+        if entry is None:
+            print(f"{k}: no such entry", file=sys.stderr)
+            failed += 1
+            continue
+        try:
+            print(ensure_static(kb, entry, ggml, support, cc=args.cc, force=args.force))
+        except (RuntimeError, FileNotFoundError, OSError) as e:
+            print(f"{k}: {e}", file=sys.stderr)
+            failed += 1
+    return 1 if failed else 0
+
+
+def cmd_bundle(args: argparse.Namespace) -> int:
+    """Link the static libs of all entries into one shared library (default <root>/libxtc_kernels.so)."""
+    kb = KernelBase(args.root)
+    ggml, support = _support_dirs(args)
+    entries = [kb.get(k) for k in kb.keys()]
+    for entry in entries:
+        ensure_static(kb, entry, ggml, support, cc=args.cc)
+    out = args.out or kb.root / "libxtc_kernels.so"
+    build_bundle(entries, out, support, cc=args.cc)
+    print(f"bundled {len(entries)} kernel(s) into {out}")
+    return 0
+
+
+def _add_support_args(ap: argparse.ArgumentParser) -> None:
+    ap.add_argument("--ggml-include", type=str, default=None, help="ggml include dir (default: $GGML_INCLUDE_DIR)")
+    ap.add_argument(
+        "--support-include", type=str, default=None,
+        help="xtc_support_lib include dir (default: $XTC_SUPPORT_LIB_INCLUDE)",
+    )
+    ap.add_argument("--cc", type=str, default="cc", help="C compiler for the wrappers and the bundle")
+
+
 def main() -> int:
     p = argparse.ArgumentParser(prog="xtc-kernelbase", description="XTC kernel base tools")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -205,6 +257,19 @@ def main() -> int:
     pb.add_argument("--force", action="store_true", help="build even if the schedule is still marked TODO")
     pb.add_argument("--overwrite", action="store_true")
     pb.set_defaults(func=cmd_build)
+
+    pbd = sub.add_parser("static", help="build libxtc_k_<key>.a (wrapper + kernel object) for entries")
+    _add_root_arg(pbd)
+    _add_support_args(pbd)
+    pbd.add_argument("keys", nargs="*", help="kernel keys (default: all)")
+    pbd.add_argument("--force", action="store_true", help="rebuild the kernel object even if present")
+    pbd.set_defaults(func=cmd_static)
+
+    pbl = sub.add_parser("bundle", help="link all static libs into libxtc_kernels.so")
+    _add_root_arg(pbl)
+    _add_support_args(pbl)
+    pbl.add_argument("--out", type=Path, default=None, help="output shared library (default: <root>/libxtc_kernels.so)")
+    pbl.set_defaults(func=cmd_bundle)
 
     ns = p.parse_args()
     return int(ns.func(ns))

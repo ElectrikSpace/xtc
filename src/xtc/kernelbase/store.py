@@ -50,6 +50,14 @@ class KernelEntry:
         return self.path / "kernel.so"
 
     @property
+    def kernel_obj(self) -> Path:
+        return self.path / "kernel.o"
+
+    @property
+    def static_lib(self) -> Path:
+        return self.path / f"libxtc_k_{self.key}.a"
+
+    @property
     def graph_yaml(self) -> Path:
         return self.path / "graph.yaml"
 
@@ -125,6 +133,8 @@ class KernelBase:
                 shared_lib=True,
                 dump_file=str(tmp_dump),
                 bare_ptr=bare_ptr,
+                save_temps=True,
+                save_temps_dir=tmpd,
             )
             module = comp.compile(schedule=mlir_sched)
 
@@ -132,6 +142,11 @@ class KernelBase:
             if not src_so.is_file():
                 raise FileNotFoundError(f"compiled shared library missing: {src_so}")
             shutil.copy2(src_so, entry.kernel_so)
+
+            src_obj = Path(tmpd) / "kernel.o"
+            if not src_obj.is_file():
+                raise FileNotFoundError(f"compiled object missing: {src_obj}")
+            shutil.copy2(src_obj, entry.kernel_obj)
 
         canonical = canonical_graph_dict(graph)
         try:
@@ -146,6 +161,7 @@ class KernelBase:
             "sha256": full_hash,
             "canonical_graph": canonical,
             "payload_name": module.payload_name,
+            "object": "kernel.o",
             "graph_name": graph.name,
             "backend": backend,
             "backend_kwargs": backend_kwargs,

@@ -2,12 +2,17 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright (c) 2024-2026 The XTC Project Authors
 #
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
 import xtc.graphs.xtc.op as O
 from xtc.graphs.xtc.builder import graph_builder
 from xtc.graphs.xtc.data import XTCTensorType
 from xtc.kernelbase import DescriptSchedule, KernelBase, graph_hash, graph_key
+from xtc.kernelbase.static import build_bundle, build_static
 
 
 def test_tensor_type_layout_const_roundtrip():
@@ -97,7 +102,39 @@ def test_kernelbase_add_lookup(tmp_path):
     entry = kb.add(graph, sched, overwrite=True)
     assert kb.lookup(graph) is not None
     assert entry.kernel_so.is_file()
+    assert entry.kernel_obj.is_file()
     assert entry.test_py.is_file()
+
+
+def test_static_lib_and_bundle_export_registry_only(tmp_path):
+    ggml_inc = Path(__file__).resolve().parents[5] / "llama.cpp" / "ggml" / "include"
+    support_inc = Path(__file__).resolve().parents[5] / "xtc_support_lib" / "include"
+    if not (ggml_inc / "ggml.h").is_file() or not support_inc.is_dir():
+        pytest.skip("ggml / xtc_support_lib headers not found")
+    if shutil.which("objcopy") is None or shutil.which("ar") is None:
+        pytest.skip("binutils not available")
+
+    a = O.tensor((4, 64), "float32", name="A")
+    b = O.tensor((64, 32), "float32", name="B", layout=[1, 0])
+    with O.graph(name="matmul") as gb:
+        O.matmul(a, b, name="C")
+    graph = gb.graph
+    sched = DescriptSchedule(node_name="C", abstract_dims=["I", "J", "K"], spec={"I": {}, "J": {}, "K": {}})
+    kb = KernelBase(tmp_path / "kb")
+    entry = kb.add(graph, sched, overwrite=True)
+
+    lib = build_static(entry, ggml_inc, support_inc)
+    assert lib.name == f"libxtc_k_{entry.key}.a"
+    wrapper = (entry.path / "wrapper.c").read_text(encoding="utf-8")
+    assert f"int xtc_k_{entry.key}(" in wrapper
+    assert "xtc_kernel_check(srcs[0], GGML_TYPE_F32, 4, 64, 4)" in wrapper
+    assert "xtc_kernel_check(srcs[1], GGML_TYPE_F32, 4, 64, 32)" in wrapper
+    assert "xtc_kernel_check(dst, GGML_TYPE_F32, 4, 32, 4)" in wrapper
+
+    so = build_bundle([entry], tmp_path / "libxtc_kernels.so", support_inc)
+    out = subprocess.run(["nm", "-D", "--defined-only", str(so)], capture_output=True, text=True, check=True).stdout
+    exported = {line.split()[-1] for line in out.splitlines()}
+    assert exported == {"xtc_kernel_abi_version", "xtc_kernel_registry", "xtc_kernel_registry_size"}
 
 
 # --- canonical form -------------------------------------------------------------------
