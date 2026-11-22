@@ -1051,6 +1051,9 @@ class MlirOperatorExp(MlirOperatorEltwiseUnary):
     @staticmethod
     @override
     def body(x: SSAValue, elt_in: Any, elt_out: Any) -> SSAValue:
+        if elt_in == f16:  # the Mppa has no f16 exp: compute in f32
+            x32 = arith.ExtFOp(x, f32).result
+            return arith.TruncFOp(math.ExpOp(x32).result, f16).result
         return math.ExpOp(x).result
 
 
@@ -1069,11 +1072,15 @@ class MlirOperatorSilu(MlirOperatorEltwiseUnary):
     @staticmethod
     @override
     def body(x: SSAValue, elt_in: Any, elt_out: Any) -> SSAValue:
-        neg = arith.NegfOp(x)
+        # f16: compute in f32 (the Mppa has no f16 exp)
+        xc = arith.ExtFOp(x, f32).result if elt_in == f16 else x
+        elt = f32 if elt_in == f16 else elt_in
+        neg = arith.NegfOp(xc)
         ex = math.ExpOp(neg.result)
-        one = arith.ConstantOp(builtin.FloatAttr(1.0, elt_in))
+        one = arith.ConstantOp(builtin.FloatAttr(1.0, elt))
         den = arith.AddfOp(one.result, ex.result)
-        return arith.DivfOp(x, den.result).result
+        res = arith.DivfOp(xc, den.result).result
+        return arith.TruncFOp(res, f16).result if elt_in == f16 else res
 
 
 class MlirOperatorCast(MlirOperatorEltwiseUnary):

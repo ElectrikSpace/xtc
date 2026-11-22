@@ -102,6 +102,7 @@ class KernelBase:
         overwrite: bool = False,
         bare_ptr: bool = True,
         target: str | None = None,
+        validate: bool = True,
     ) -> KernelEntry:
         if target not in (None, "mppa"):
             raise ValueError(f"unknown kernel target {target!r}")
@@ -137,7 +138,7 @@ class KernelBase:
         mlir_sched = sch_impl.schedule()
 
         if target == "mppa":
-            module = self._build_mppa(impl, mlir_sched, bare_ptr, entry)
+            module = self._build_mppa(impl, mlir_sched, bare_ptr, entry, validate)
         else:
             with tempfile.TemporaryDirectory(prefix="xtc_kb_build_") as tmpd:
                 tmp_dump = Path(tmpd) / "kernel"
@@ -193,7 +194,9 @@ class KernelBase:
 
         return entry
 
-    def _build_mppa(self, impl: Any, sched: Any, bare_ptr: bool, entry: KernelEntry) -> Any:
+    def _build_mppa(
+        self, impl: Any, sched: Any, bare_ptr: bool, entry: KernelEntry, validate: bool = True
+    ) -> Any:
         from xtc.runtimes.accelerator.mppa import MppaDevice
 
         # the host runner stores the path of the device kernel: build it in the entry directory
@@ -204,7 +207,7 @@ class KernelBase:
             bare_ptr=bare_ptr,
         )
         module = comp.compile(schedule=sched)
-        if module.get_executor(validate=True).execute() != 0:
+        if validate and module.get_executor(validate=True).execute() != 0:
             shutil.rmtree(entry.path)
             raise RuntimeError("MPPA kernel does not validate against the reference")
         return module
