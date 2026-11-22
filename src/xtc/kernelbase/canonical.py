@@ -18,7 +18,7 @@ __all__ = [
 ]
 
 
-def canonical_graph_dict(graph: XTCGraph) -> dict[str, Any]:
+def canonical_graph_dict(graph: XTCGraph, target: str | None = None) -> dict[str, Any]:
     """Graph representation used for kernel base keys.
 
     Kept: operators (name and attributes), graph structure, tensor shapes,
@@ -26,9 +26,10 @@ def canonical_graph_dict(graph: XTCGraph) -> dict[str, Any]:
     Dropped: graph name, node/tensor display names and ops_version.
     Unique ids are renumbered ``%0, %1, ...`` in order of appearance (inputs,
     then nodes), so the key does not depend on global expression counters.
+    ``target`` (e.g. "mppa") is added when set; host kernels have none.
 
     The same canonical form is computed natively by the llama.cpp ggml-xtc
-    backend for MUL_MAT nodes, so any change here must be mirrored there.
+    backends for MUL_MAT nodes, so any change here must be mirrored there.
     """
     d = graph.to_dict()
     uid_map: dict[str, str] = {}
@@ -43,25 +44,28 @@ def canonical_graph_dict(graph: XTCGraph) -> dict[str, Any]:
             out["expr"] = {**expr, "args": [uid_map[a] for a in expr["args"]]}
         return out
 
-    return {
+    out: dict[str, Any] = {
         "inputs": [conv(i) for i in d["inputs"]],
         "nodes": [conv(n) for n in d["nodes"]],
         "outputs": [{"uid": uid_map[o["uid"]]} for o in d["outputs"]],
     }
+    if target is not None:
+        out["target"] = target
+    return out
 
 
-def canonical_graph_json(graph: XTCGraph) -> str:
+def canonical_graph_json(graph: XTCGraph, target: str | None = None) -> str:
     return json.dumps(
-        canonical_graph_dict(graph),
+        canonical_graph_dict(graph, target),
         sort_keys=True,
         separators=(",", ":"),
     )
 
 
-def graph_hash(graph: XTCGraph) -> str:
+def graph_hash(graph: XTCGraph, target: str | None = None) -> str:
     """Full sha256 (hex) of the canonical graph JSON."""
-    return hashlib.sha256(canonical_graph_json(graph).encode("utf-8")).hexdigest()
+    return hashlib.sha256(canonical_graph_json(graph, target).encode("utf-8")).hexdigest()
 
 
-def graph_key(graph: XTCGraph, prefix_len: int = 16) -> str:
-    return graph_hash(graph)[:prefix_len]
+def graph_key(graph: XTCGraph, prefix_len: int = 16, target: str | None = None) -> str:
+    return graph_hash(graph, target)[:prefix_len]
