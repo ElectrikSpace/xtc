@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Can be set to True for RUNTIME_DEBUG
 RUNTIME_DEBUG = False
 
-MAX_NB_LOADED_KERNELS = 10
+MAX_NB_LOADED_KERNELS = 32
 NB_CC = 5
 NB_PE = 16
 
