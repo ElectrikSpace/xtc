@@ -128,7 +128,8 @@ class KernelBase:
         if schedule.default_node is not None:
             sched_kw["default_node"] = schedule.default_node
         sch_impl = impl.get_scheduler(**sched_kw)
-        if target == "mppa":
+        # a schedule with ``defines_mesh`` sets its own meshes in apply()
+        if target == "mppa" and not getattr(schedule, "defines_mesh", False):
             from xtc.runtimes.accelerator.mppa import MppaDevice
 
             nb_pe = MppaDevice().nb_pe
